@@ -1,0 +1,218 @@
+@import "tailwindcss";
+
+@theme {
+  /* Warm-shifted navy. A pure blue-black reads clinical; these carry a little
+     red so the screen feels like a lamp-lit desk, not a server rack. */
+  --color-ink: #070d18;
+  --color-raised: #0c1424;
+  --color-card: #101b2e;
+  --color-line: #1d2c45;
+  --color-line-soft: #17243a;
+
+  --color-cyan: #38d9f0;
+  --color-indigo: #6d76f5;
+  --color-amber: #f0a63c;
+  --color-rose: #f2647e;
+  --color-mint: #45d8a0;
+
+  --color-text: #eaf0f9;
+  --color-muted: #93a6c2;
+  --color-faint: #62789c;
+
+  --font-display: var(--font-display), ui-serif, Georgia, serif;
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  /* The page background lives on <html> so body's ::before grain can sit at a
+     negative z-index and still be visible. */
+  background: #070d18;
+  /* The hero's decorative rings deliberately bleed past the card. `clip`
+     rather than `hidden` — hidden would make <html> a scroll container and
+     break the sticky headers. */
+  overflow-x: clip;
+}
+
+body {
+  background: transparent;
+  color: #eaf0f9;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Layered atmosphere: two pools of light plus a faint ledger rule that reads
+   as ruled paper rather than a tech grid. */
+.atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image:
+    radial-gradient(760px 520px at 8% -10%, rgba(109, 118, 245, 0.16), transparent 62%),
+    radial-gradient(680px 460px at 96% 4%, rgba(56, 217, 240, 0.1), transparent 60%),
+    radial-gradient(900px 600px at 50% 108%, rgba(240, 166, 60, 0.055), transparent 66%);
+}
+
+.ledger {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 31px,
+    rgba(147, 166, 194, 0.045) 31px,
+    rgba(147, 166, 194, 0.045) 32px
+  );
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, #000 20%, transparent 78%);
+}
+
+/* Film grain, inline so nothing is fetched. Warms up the flat panels.
+   Sits at the bottom of the stack: grain (-3) < atmosphere (-2) < ledger (-1)
+   < content (auto). Bumping content z-index instead would clobber the
+   position: fixed on the two layers above. */
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -3;
+  pointer-events: none;
+  opacity: 0.16;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: rgba(56, 217, 240, 0.3);
+  color: #fff;
+}
+
+*::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #1d2c45;
+  border-radius: 999px;
+  border: 3px solid #070d18;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #2c4066;
+}
+
+/* ---------------------------------------------------------- typography */
+
+.display {
+  font-family: var(--font-display);
+  font-variation-settings: "SOFT" 24, "WONK" 0, "opsz" 40;
+  letter-spacing: -0.022em;
+  font-weight: 600;
+}
+
+.display-loose {
+  font-family: var(--font-display);
+  font-variation-settings: "SOFT" 40, "WONK" 1, "opsz" 96;
+  letter-spacing: -0.03em;
+  font-weight: 500;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #62789c;
+}
+
+/* ---------------------------------------------------------- motion */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s cubic-bezier(0.16, 0.84, 0.44, 1) both;
+}
+
+/* Staggered page-load reveal — one orchestrated moment beats scattered ones. */
+.reveal > * {
+  animation: fade-up 0.6s cubic-bezier(0.16, 0.84, 0.44, 1) both;
+}
+.reveal > *:nth-child(1) { animation-delay: 0.04s; }
+.reveal > *:nth-child(2) { animation-delay: 0.12s; }
+.reveal > *:nth-child(3) { animation-delay: 0.2s; }
+.reveal > *:nth-child(4) { animation-delay: 0.28s; }
+.reveal > *:nth-child(5) { animation-delay: 0.36s; }
+.reveal > *:nth-child(6) { animation-delay: 0.44s; }
+
+@keyframes blink {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 1; }
+}
+
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: #38d9f0;
+  animation: blink 1.05s steps(2, start) infinite;
+}
+
+@keyframes trace {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes lamp {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.95; }
+}
+
+@keyframes rise {
+  0% { opacity: 0; transform: translateY(7px) scale(0.94); }
+  100% { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------- surfaces */
+
+/* A hairline of light along the top edge — the way a lamp catches a page. */
+.lit {
+  position: relative;
+}
+.lit::before {
+  content: "";
+  position: absolute;
+  inset-inline: 12%;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(56, 217, 240, 0.42), transparent);
+}

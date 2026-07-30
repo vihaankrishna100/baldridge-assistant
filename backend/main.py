@@ -1,0 +1,83 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from config import settings
+from database import Base, SessionLocal, engine, run_migrations
+from rag.index import index
+from routes import admin, auth, chat, documents
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    run_migrations()
+    db = SessionLocal()
+    try:
+        count = index.rebuild(db)
+        print(f"[startup] retrieval index ready — {count} chunks")
+    finally:
+        db.close()
+    if not settings.anthropic_api_key:
+        print("[startup] WARNING: ANTHROPIC_API_KEY is not set; /chat/ask will fail")
+    if not (settings.org_phone or settings.org_email):
+        print(
+            "[startup] WARNING: ORG_PHONE / ORG_EMAIL are blank — the fallback "
+            "message will tell staff to ask a supervisor instead of giving a number"
+        )
+    yield
+
+
+app = FastAPI(
+    title=f"{settings.org_name} Internal Assistant",
+    version="1.0.0",
+    lifespan=lifespan,
+    # Interactive docs are off by default: the schema describes every admin
+    # endpoint of a system holding private documents.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # Nothing here should ever be indexed or cached by an intermediary.
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
+
+
+@app.exception_handler(Exception)
+async def unhandled(request: Request, exc: Exception):
+    # Never surface tracebacks: they can echo document text or file paths.
+    print(f"[error] {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Something went wrong. Please try again or contact an administrator."},
+    )
+
+
+app.include_router(auth.router)
+app.include_router(chat.router)
+app.include_router(documents.router)
+app.include_router(admin.router)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "org": settings.org_name, "index": index.stats()}

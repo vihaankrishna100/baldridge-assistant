@@ -1,0 +1,456 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import AppShell from "@/components/AppShell";
+import { api } from "@/lib/api";
+import { useRequireAuth, type User } from "@/lib/auth";
+
+type Stats = {
+  users: number;
+  documents: number;
+  questions_30d: number;
+  answered_30d: number;
+  escalated_30d: number;
+  answer_rate: number;
+  index: { chunks: number; documents: number; semantic_enabled: boolean };
+  coverage_gaps: { question: string; count: number }[];
+};
+
+type Settings = {
+  org_name: string;
+  org_phone: string;
+  org_email: string;
+  contact_configured: boolean;
+  require_2fa: boolean;
+  twofa_exempt: string[];
+  model: string;
+  effort: string;
+  retrieval_min_score: number;
+  max_queries_per_hour: number;
+};
+
+type Invite = { id: string; email: string; role: string; expires_at: string };
+type AuditRow = {
+  id: number;
+  at: string;
+  user_email: string;
+  action: string;
+  target: string;
+  detail: string;
+  ip: string;
+};
+
+const ACTION_TONE: Record<string, string> = {
+  login_failed: "text-amber",
+  account_locked: "text-rose",
+  "2fa_failed": "text-amber",
+  meta_query_blocked: "text-rose",
+  document_access_denied: "text-rose",
+  question_escalated: "text-amber",
+  document_deleted: "text-rose",
+  user_deactivated: "text-rose",
+};
+
+export default function AdminPage() {
+  const { user, loading } = useRequireAuth("admin");
+  const [tab, setTab] = useState<"overview" | "people" | "audit">("overview");
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("staff");
+  const [inviteLink, setInviteLink] = useState("");
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const [s, cfg, u, i, a] = await Promise.all([
+        api<Stats>("/admin/stats"),
+        api<Settings>("/admin/settings"),
+        api<User[]>("/admin/users"),
+        api<Invite[]>("/admin/invites"),
+        api<AuditRow[]>("/admin/audit?limit=150"),
+      ]);
+      setStats(s);
+      setSettings(cfg);
+      setUsers(u);
+      setInvites(i);
+      setAudit(a);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load the admin data.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user) void load();
+  }, [user, load]);
+
+  const createInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    try {
+      const res = await api<{ invite_url: string }>("/admin/invites", {
+        method: "POST",
+        body: { email: inviteEmail, role: inviteRole },
+      });
+      setInviteLink(res.invite_url);
+      setInviteEmail("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the invitation.");
+    }
+  };
+
+  if (loading || !user) {
+    return <div className="grid flex-1 place-items-center text-sm text-muted">Loading…</div>;
+  }
+
+  return (
+    <AppShell>
+      <div className="mb-6">
+        <p className="eyebrow">Control</p>
+        <h1 className="display-loose mt-3 text-[2rem] text-text">Administration</h1>
+        <p className="mt-1.5 text-sm text-muted">Access, activity, and coverage.</p>
+      </div>
+
+      {settings && !settings.contact_configured && (
+        <div className="mb-6 rounded-2xl border border-amber/45 bg-amber/8 p-4">
+          <p className="text-sm font-medium text-amber">Fallback contact is not configured</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted">
+            When the assistant can&apos;t answer, it currently tells staff to ask a supervisor
+            because it has no number to give. Set <code className="text-cyan">ORG_PHONE</code> and{" "}
+            <code className="text-cyan">ORG_EMAIL</code> in <code>backend/.env</code> and restart
+            the API. It will never invent a number.
+          </p>
+        </div>
+      )}
+
+      {settings && settings.twofa_exempt.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-rose/40 bg-rose/8 p-4">
+          <p className="text-sm font-medium text-rose">
+            {settings.twofa_exempt.length === 1
+              ? "1 account signs in without two-factor"
+              : `${settings.twofa_exempt.length} accounts sign in without two-factor`}
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-muted">
+            <span className="text-text">{settings.twofa_exempt.join(", ")}</span> — password
+            alone reaches every document in the library, including leadership-only files. Use a
+            long, unique password on {settings.twofa_exempt.length === 1 ? "it" : "them"}, and
+            remove {settings.twofa_exempt.length === 1 ? "it" : "them"} from{" "}
+            <code className="text-cyan">TWOFA_EXEMPT_EMAILS</code> in{" "}
+            <code>backend/.env</code>{" "}
+            once you&apos;re past setup.
+          </p>
+        </div>
+      )}
+
+      <div className="mb-6 flex gap-1.5">
+        {(["overview", "people", "audit"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`rounded-lg px-3.5 py-1.5 text-sm capitalize transition ${
+              tab === t ? "bg-cyan/12 text-cyan" : "text-muted hover:bg-white/5 hover:text-text"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <p className="mb-5 rounded-xl border border-rose/40 bg-rose/10 px-4 py-2.5 text-sm text-rose">
+          {error}
+        </p>
+      )}
+
+      {tab === "overview" && stats && (
+        <div className="space-y-6">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Active staff" value={stats.users} />
+            <Stat label="Live documents" value={stats.documents} />
+            <Stat
+              label="Answered from docs (30d)"
+              value={stats.answered_30d}
+              hint={`${Math.round(stats.answer_rate * 100)}% of questions`}
+            />
+            <Stat
+              label="Referred to a person (30d)"
+              value={stats.escalated_30d}
+              hint="Working as designed"
+              tone="amber"
+            />
+          </div>
+
+          <section className="rounded-2xl border border-line bg-card/70 p-6">
+            <h2 className="text-sm font-semibold text-text">Where the documents fall short</h2>
+            <p className="mt-1 mb-4 text-sm text-muted">
+              Questions staff asked that nothing in the library answered. Each one is a candidate
+              for a new policy document.
+            </p>
+            {stats.coverage_gaps.length === 0 ? (
+              <p className="text-sm text-faint">Nothing yet.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {stats.coverage_gaps.map((gap) => (
+                  <li
+                    key={gap.question}
+                    className="flex items-start gap-3 rounded-lg bg-ink/40 px-3 py-2 text-sm"
+                  >
+                    <span className="mt-0.5 rounded-md bg-amber/20 px-1.5 text-[11px] text-amber">
+                      {gap.count}×
+                    </span>
+                    <span className="text-muted">{gap.question}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {settings && (
+            <section className="rounded-2xl border border-line bg-card/70 p-6">
+              <h2 className="mb-4 text-sm font-semibold text-text">Configuration</h2>
+              <dl className="grid gap-x-8 gap-y-2.5 text-sm sm:grid-cols-2">
+                <Row label="Model" value={`${settings.model} · effort ${settings.effort}`} />
+                <Row
+                  label="Retrieval index"
+                  value={`${stats.index.chunks} sections${
+                    stats.index.semantic_enabled ? " · semantic on" : " · keyword only"
+                  }`}
+                />
+                <Row label="Refusal threshold" value={String(settings.retrieval_min_score)} />
+                <Row label="Rate limit" value={`${settings.max_queries_per_hour} questions/hour`} />
+                <Row
+                  label="Two-factor"
+                  value={
+                    settings.require_2fa
+                      ? settings.twofa_exempt.length
+                        ? `Required — ${settings.twofa_exempt.length} exempt`
+                        : "Required"
+                      : "Off"
+                  }
+                />
+                <Row
+                  label="Fallback contact"
+                  value={
+                    settings.contact_configured
+                      ? [settings.org_phone, settings.org_email].filter(Boolean).join(" · ")
+                      : "Not configured"
+                  }
+                />
+              </dl>
+            </section>
+          )}
+        </div>
+      )}
+
+      {tab === "people" && (
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-line bg-card/70 p-6">
+            <h2 className="mb-4 text-sm font-semibold text-text">Invite a team member</h2>
+            <form onSubmit={createInvite} className="flex flex-wrap gap-2.5">
+              <input
+                type="email"
+                required
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="name@baldridgelodge.org"
+                className="min-w-56 flex-1 rounded-xl border border-line bg-ink/60 px-3.5 py-2.5 text-sm text-text outline-none focus:border-cyan/50"
+              />
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value)}
+                className="rounded-xl border border-line bg-ink/60 px-3.5 py-2.5 text-sm text-text outline-none focus:border-cyan/50"
+              >
+                <option value="staff">Staff</option>
+                <option value="leadership">Leadership</option>
+                <option value="admin">Administrator</option>
+              </select>
+              <button className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition hover:brightness-110">
+                Create link
+              </button>
+            </form>
+
+            {inviteLink && (
+              <div className="mt-4 rounded-xl border border-mint/40 bg-mint/8 p-3.5">
+                <p className="text-xs text-mint">
+                  Send this link to the new team member. It expires in 7 days and is shown only
+                  once — nothing stores the link itself.
+                </p>
+                <code className="mt-2 block break-all rounded-lg bg-ink/60 p-2.5 font-mono text-xs text-cyan">
+                  {inviteLink}
+                </code>
+                <button
+                  onClick={() => void navigator.clipboard.writeText(inviteLink)}
+                  className="mt-2 rounded-lg border border-line px-3 py-1 text-xs text-muted hover:text-cyan"
+                >
+                  Copy
+                </button>
+              </div>
+            )}
+
+            {invites.length > 0 && (
+              <ul className="mt-5 space-y-1.5">
+                {invites.map((inv) => (
+                  <li
+                    key={inv.id}
+                    className="flex items-center gap-3 rounded-lg bg-ink/40 px-3 py-2 text-sm"
+                  >
+                    <span className="flex-1 text-muted">
+                      {inv.email}{" "}
+                      <span className="text-faint">
+                        · {inv.role} · expires {new Date(inv.expires_at).toLocaleDateString()}
+                      </span>
+                    </span>
+                    <button
+                      onClick={async () => {
+                        await api(`/admin/invites/${inv.id}`, { method: "DELETE" });
+                        await load();
+                      }}
+                      className="text-xs text-faint hover:text-rose"
+                    >
+                      Revoke
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-line bg-card/70 p-6">
+            <h2 className="mb-4 text-sm font-semibold text-text">Accounts</h2>
+            <ul className="space-y-2">
+              {users.map((u) => (
+                <li
+                  key={u.id}
+                  className={`flex flex-wrap items-center gap-3 rounded-xl border border-line px-4 py-3 ${
+                    u.is_active ? "" : "opacity-50"
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-text">{u.full_name || u.email}</p>
+                    <p className="text-[11px] text-faint">
+                      {u.email} · {u.role}
+                      {u.totp_confirmed ? " · 2FA active" : " · 2FA not set up"}
+                      {u.is_active ? "" : " · deactivated"}
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <select
+                      value={u.role}
+                      onChange={async (e) => {
+                        await api(`/admin/users/${u.id}/role`, {
+                          method: "POST",
+                          body: { role: e.target.value },
+                        });
+                        await load();
+                      }}
+                      className="rounded-lg border border-line bg-ink/60 px-2 py-1 text-xs text-muted"
+                    >
+                      <option value="staff">Staff</option>
+                      <option value="leadership">Leadership</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    <button
+                      onClick={async () => {
+                        await api(`/admin/users/${u.id}/reset-2fa`, { method: "POST" });
+                        await load();
+                      }}
+                      className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-amber"
+                    >
+                      Reset 2FA
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const action = u.is_active ? "deactivate" : "activate";
+                        await api(`/admin/users/${u.id}/${action}`, { method: "POST" });
+                        await load();
+                      }}
+                      className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-rose"
+                    >
+                      {u.is_active ? "Deactivate" : "Reactivate"}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      )}
+
+      {tab === "audit" && (
+        <section className="overflow-hidden rounded-2xl border border-line bg-card/50">
+          <div className="border-b border-line px-5 py-3.5">
+            <h2 className="text-sm font-semibold text-text">Audit trail</h2>
+            <p className="mt-0.5 text-xs text-muted">
+              Every sign-in, document access, and question. Append-only.
+            </p>
+          </div>
+          <div className="max-h-[65vh] overflow-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 bg-raised text-[11px] tracking-wider text-faint uppercase">
+                <tr>
+                  <th className="px-4 py-2.5 font-medium">When</th>
+                  <th className="px-4 py-2.5 font-medium">Who</th>
+                  <th className="px-4 py-2.5 font-medium">Action</th>
+                  <th className="px-4 py-2.5 font-medium">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {audit.map((row) => (
+                  <tr key={row.id} className="border-t border-line-soft/60">
+                    <td className="px-4 py-2 text-xs whitespace-nowrap text-faint">
+                      {new Date(row.at).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted">{row.user_email || "—"}</td>
+                    <td
+                      className={`px-4 py-2 font-mono text-xs ${ACTION_TONE[row.action] ?? "text-cyan"}`}
+                    >
+                      {row.action}
+                    </td>
+                    <td className="max-w-md truncate px-4 py-2 text-xs text-muted">
+                      {[row.target, row.detail].filter(Boolean).join(" — ")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </AppShell>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: number;
+  hint?: string;
+  tone?: "amber";
+}) {
+  return (
+    <div className="lit rounded-2xl border border-line bg-card/70 p-5">
+      <p className="font-mono text-[10px] tracking-[0.16em] text-faint uppercase">{label}</p>
+      <p className={`display mt-2 text-[1.9rem] ${tone === "amber" ? "text-amber" : "text-text"}`}>
+        {value}
+      </p>
+      {hint && <p className="mt-0.5 text-[11px] text-faint">{hint}</p>}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 border-b border-line-soft/50 pb-2">
+      <dt className="text-muted">{label}</dt>
+      <dd className="text-right text-text">{value}</dd>
+    </div>
+  );
+}

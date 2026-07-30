@@ -1,0 +1,7 @@
+venv/
+data/
+storage/
+__pycache__/
+*.py[cod]
+.env
+selftest.py
