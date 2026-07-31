@@ -1,0 +1,36 @@
+[Unit]
+Description=Bald Ridge Lodge internal assistant API
+After=network.target
+
+[Service]
+Type=simple
+User=baldridge
+Group=baldridge
+WorkingDirectory=/opt/baldridge/backend
+EnvironmentFile=/opt/baldridge/backend/.env
+
+# One worker on purpose. The retrieval index is held in this process's memory;
+# N workers would mean N copies of it and a rebuild on every upload in each.
+# Scale by giving the box more CPU, not by adding workers.
+ExecStart=/opt/baldridge/backend/venv/bin/uvicorn main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 1 \
+    --proxy-headers \
+    --forwarded-allow-ips='127.0.0.1'
+
+Restart=always
+RestartSec=5
+
+# The app only ever needs to write to its own data directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/baldridge/backend/data /opt/baldridge/backend/storage
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

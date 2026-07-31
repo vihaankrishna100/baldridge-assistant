@@ -235,7 +235,16 @@ class HybridIndex:
             n_components = min(256, self._tfidf.shape[1] - 1, len(entries) - 1)
             if len(entries) >= MIN_CHUNKS_FOR_LSA and n_components >= 16:
                 self._svd = TruncatedSVD(n_components=n_components, random_state=0)
-                self._dense = normalize(self._svd.fit_transform(self._tfidf))
+                dense = normalize(self._svd.fit_transform(self._tfidf))
+                # Randomized SVD can degenerate on a pathological corpus. A
+                # non-finite projection would poison every semantic score
+                # silently, so fall back to lexical-only rather than serve it.
+                if np.isfinite(dense).all():
+                    self._dense = dense
+                else:
+                    print("[index] SVD produced non-finite values — semantic search disabled")
+                    self._svd = None
+                    self._dense = None
             else:
                 self._svd = None
                 self._dense = None

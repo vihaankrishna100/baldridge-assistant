@@ -126,13 +126,16 @@ def ask(
         hits = index.search(question, visible_tiers_for_role(user.role))
         if not hits:
             reason = "no_match"
-        elif hits[0].score < settings.retrieval_min_score:
+        # Hits are ordered by fused rank, not by confidence, so the best-matching
+        # passage is often not hits[0]. Gate on the strongest match in the set —
+        # reading hits[0] alone refuses questions the corpus clearly answers.
+        elif max(h.score for h in hits) < settings.retrieval_min_score:
             reason = "low_confidence"
 
     history = _history_for(db, conversation_id)
     user_id, user_email, user_role = user.id, user.email, user.role
     ip = audit.client_ip(request)
-    top_score = hits[0].score if hits else 0.0
+    top_score = max((h.score for h in hits), default=0.0)
 
     def event_stream():
         # Fresh session: the request-scoped one closes when the response starts

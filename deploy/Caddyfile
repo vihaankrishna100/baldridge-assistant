@@ -1,0 +1,30 @@
+# Caddy terminates TLS and proxies to the API on localhost. It obtains and
+# renews certificates automatically — no certbot cron, no expiry surprises.
+#
+# Replace the domain, then: sudo caddy reload --config /etc/caddy/Caddyfile
+
+api.baldridgelodge.org {
+    encode zstd gzip
+
+    # SSE: the assistant streams its answer token by token, so buffering the
+    # response would make every question feel like a 10-second hang.
+    reverse_proxy 127.0.0.1:8000 {
+        flush_interval -1
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy no-referrer
+        X-Robots-Tag "noindex, nofollow, noarchive"
+        -Server
+    }
+
+    request_body {
+        # Matches MAX_UPLOAD_MB in the app, with headroom for the encoding.
+        max_size 30MB
+    }
+}
