@@ -2,19 +2,18 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 
 import audit
 import llm
 from config import settings
-from database import SessionLocal, get_db
 from deps import current_user, enforce_rate_limit
-from models import Conversation, Message, User, visible_tiers_for_role
+from models import visible_tiers_for_role
 from rag.index import Hit, index
+from repo import get_repo
+from repo.base import AuditEntry, ConversationRecord, MessageRecord, UserRecord, utcnow
 from schemas import AskRequest
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -42,10 +41,6 @@ REASONS = {
     "meta_query": "I can only answer questions about {org}'s internal documents.",
     "error": "Something went wrong on my end while looking this up.",
 }
-
-
-def _now():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -84,37 +79,91 @@ def _source_summary(hits: list[Hit]) -> list[dict]:
     ]
 
 
+def _log(action: str, user_id: str, user_email: str, ip: str, detail: str = "", target: str = "") -> None:
+    """Audit from inside the response generator.
+
+    The request-scoped `user` object isn't carried into the stream, so the few
+    identity fields it needs are passed as plain strings.
+    """
+    get_repo().append_audit(
+        AuditEntry(
+            user_id=user_id, user_email=user_email, action=action,
+            target=target[:300], detail=detail[:2000], ip=ip,
+        )
+    )
+
+
+def _history_for(conversation_id: str) -> list[dict]:
+    rows = get_repo().list_messages(conversation_id)
+    turns = []
+    # Drop the question we just stored — it is sent separately with its sources.
+    for msg in rows[:-1]:
+        if msg.role == "assistant" and msg.escalated:
+            continue  # escalations carry no grounded content worth replaying
+        turns.append({"role": msg.role, "content": msg.content})
+    return turns[-6:]
+
+
+def _finish_escalated(
+    conversation_id: str,
+    reason: str,
+    user_id: str,
+    user_email: str,
+    ip: str,
+    question: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+):
+    payload = _escalation_payload(reason)
+    body = f"{payload['headline']}\n\n{payload['guidance']}"
+    get_repo().add_message(
+        MessageRecord(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=body,
+            answered=False,
+            escalated=True,
+            escalation_reason=reason,
+            citations_json="[]",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    )
+    _log("question_escalated", user_id, user_email, ip,
+         detail=f"reason={reason}", target=question[:200])
+    yield _sse("done", {**payload, "conversation_id": conversation_id, "text": body})
+
+
 @router.post("/ask")
 def ask(
     payload: AskRequest,
     request: Request,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
+    user: UserRecord = Depends(current_user),
 ):
-    enforce_rate_limit(db, user)
+    store = get_repo()
+    enforce_rate_limit(user)
     question = payload.question.strip()
 
     conversation = None
     if payload.conversation_id:
-        conversation = db.get(Conversation, payload.conversation_id)
+        conversation = store.get_conversation(payload.conversation_id)
         if conversation is None or conversation.user_id != user.id:
             raise HTTPException(status_code=404, detail="Conversation not found.")
     if conversation is None:
-        conversation = Conversation(user_id=user.id, title=question[:120])
-        db.add(conversation)
-        db.flush()
+        conversation = store.create_conversation(
+            ConversationRecord(user_id=user.id, title=question[:120])
+        )
 
-    db.add(Message(conversation_id=conversation.id, role="user", content=question))
-    conversation.updated_at = _now()
-    db.commit()
+    store.add_message(
+        MessageRecord(conversation_id=conversation.id, role="user", content=question)
+    )
+    conversation.updated_at = utcnow()
+    store.save_conversation(conversation)
     conversation_id = conversation.id
 
     is_meta = bool(META_PATTERNS.search(question))
     if is_meta:
-        audit.log(
-            db, "meta_query_blocked", user=user,
-            detail=question[:200], request=request,
-        )
+        audit.log("meta_query_blocked", user=user, detail=question[:200], request=request)
 
     hits: list[Hit] = []
     reason = ""
@@ -132,84 +181,75 @@ def ask(
         elif max(h.score for h in hits) < settings.retrieval_min_score:
             reason = "low_confidence"
 
-    history = _history_for(db, conversation_id)
-    user_id, user_email, user_role = user.id, user.email, user.role
+    history = _history_for(conversation_id)
+    user_id, user_email = user.id, user.email
     ip = audit.client_ip(request)
     top_score = max((h.score for h in hits), default=0.0)
 
     def event_stream():
-        # Fresh session: the request-scoped one closes when the response starts
-        # streaming, and this generator outlives it.
-        session = SessionLocal()
+        yield _sse(
+            "meta",
+            {
+                "conversation_id": conversation_id,
+                "sources": _source_summary(hits),
+                "top_score": top_score,
+            },
+        )
+
+        if reason:
+            yield from _finish_escalated(
+                conversation_id, reason, user_id, user_email, ip, question
+            )
+            return
+
+        result = None
         try:
-            yield _sse(
-                "meta",
-                {
-                    "conversation_id": conversation_id,
-                    "sources": _source_summary(hits),
-                    "top_score": top_score,
-                },
+            for kind, value in llm.stream_answer(question, hits, history):
+                if kind == "delta":
+                    yield _sse("delta", {"text": value})
+                else:
+                    result = value
+        except Exception as exc:  # noqa: BLE001 - never leak a stack trace
+            _log("ask_error", user_id, user_email, ip, detail=type(exc).__name__)
+            yield from _finish_escalated(
+                conversation_id, "error", user_id, user_email, ip, question
             )
+            return
 
-            if reason:
-                yield from _finish_escalated(
-                    session, conversation_id, reason, user_id, user_email, ip, question
-                )
-                return
-
-            result = None
-            try:
-                for kind, value in llm.stream_answer(question, hits, history):
-                    if kind == "delta":
-                        yield _sse("delta", {"text": value})
-                    else:
-                        result = value
-            except Exception as exc:  # noqa: BLE001 - never leak a stack trace
-                _log(session, "ask_error", user_id, user_email, ip, detail=type(exc).__name__)
-                yield from _finish_escalated(
-                    session, conversation_id, "error", user_id, user_email, ip, question
-                )
-                return
-
-            if result is None or result.escalated:
-                why = result.escalation_reason if result else "error"
-                yield from _finish_escalated(
-                    session, conversation_id, why, user_id, user_email, ip, question,
-                    input_tokens=result.input_tokens if result else 0,
-                    output_tokens=result.output_tokens if result else 0,
-                )
-                return
-
-            session.add(
-                Message(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=result.text,
-                    answered=True,
-                    escalated=False,
-                    citations_json=json.dumps(result.citations),
-                    top_score=top_score,
-                    input_tokens=result.input_tokens,
-                    output_tokens=result.output_tokens,
-                )
+        if result is None or result.escalated:
+            why = result.escalation_reason if result else "error"
+            yield from _finish_escalated(
+                conversation_id, why, user_id, user_email, ip, question,
+                input_tokens=result.input_tokens if result else 0,
+                output_tokens=result.output_tokens if result else 0,
             )
-            session.commit()
-            _log(
-                session, "question_answered", user_id, user_email, ip,
-                detail=f"{len(result.citations)} citations, score={top_score}",
-                target=question[:200],
+            return
+
+        get_repo().add_message(
+            MessageRecord(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=result.text,
+                answered=True,
+                escalated=False,
+                citations_json=json.dumps(result.citations),
+                top_score=top_score,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
             )
-            yield _sse(
-                "done",
-                {
-                    "escalated": False,
-                    "citations": result.citations,
-                    "conversation_id": conversation_id,
-                    "text": result.text,
-                },
-            )
-        finally:
-            session.close()
+        )
+        _log("question_answered", user_id, user_email, ip,
+             detail=f"{len(result.citations)} citations, score={top_score}",
+             target=question[:200])
+        yield _sse(
+            "done",
+            {
+                "escalated": False,
+                "citations": result.citations,
+                "conversation_id": conversation_id,
+                "text": result.text,
+            },
+        )
 
     return StreamingResponse(
         event_stream(),
@@ -222,95 +262,20 @@ def ask(
     )
 
 
-def _finish_escalated(
-    session: Session,
-    conversation_id: str,
-    reason: str,
-    user_id: str,
-    user_email: str,
-    ip: str,
-    question: str,
-    input_tokens: int = 0,
-    output_tokens: int = 0,
-):
-    payload = _escalation_payload(reason)
-    body = f"{payload['headline']}\n\n{payload['guidance']}"
-    session.add(
-        Message(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=body,
-            answered=False,
-            escalated=True,
-            escalation_reason=reason,
-            citations_json="[]",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
-    )
-    session.commit()
-    _log(
-        session, "question_escalated", user_id, user_email, ip,
-        detail=f"reason={reason}", target=question[:200],
-    )
-    yield _sse("done", {**payload, "conversation_id": conversation_id, "text": body})
-
-
-def _log(session, action, user_id, user_email, ip, detail="", target=""):
-    from models import AuditLog
-
-    session.add(
-        AuditLog(
-            user_id=user_id, user_email=user_email, action=action,
-            target=target[:300], detail=detail[:2000], ip=ip,
-        )
-    )
-    session.commit()
-
-
-def _history_for(db: Session, conversation_id: str) -> list[dict]:
-    rows = (
-        db.query(Message)
-        .filter(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at)
-        .all()
-    )
-    turns = []
-    # Drop the question we just stored — it is sent separately with its sources.
-    for msg in rows[:-1]:
-        if msg.role == "assistant" and msg.escalated:
-            continue  # escalations carry no grounded content worth replaying
-        turns.append({"role": msg.role, "content": msg.content})
-    return turns[-6:]
-
-
 @router.get("/conversations")
-def list_conversations(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    rows = (
-        db.query(Conversation)
-        .filter(Conversation.user_id == user.id)
-        .order_by(Conversation.updated_at.desc())
-        .limit(50)
-        .all()
-    )
+def list_conversations(user: UserRecord = Depends(current_user)):
+    rows = get_repo().list_conversations(user.id, limit=50)
     return [
         {"id": c.id, "title": c.title, "updated_at": c.updated_at.isoformat()} for c in rows
     ]
 
 
 @router.get("/conversations/{conversation_id}")
-def get_conversation(
-    conversation_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)
-):
-    conversation = db.get(Conversation, conversation_id)
+def get_conversation(conversation_id: str, user: UserRecord = Depends(current_user)):
+    store = get_repo()
+    conversation = store.get_conversation(conversation_id)
     if conversation is None or conversation.user_id != user.id:
         raise HTTPException(status_code=404, detail="Conversation not found.")
-    rows = (
-        db.query(Message)
-        .filter(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at)
-        .all()
-    )
     return {
         "id": conversation.id,
         "title": conversation.title,
@@ -324,7 +289,7 @@ def get_conversation(
                 "citations": json.loads(m.citations_json or "[]"),
                 "created_at": m.created_at.isoformat(),
             }
-            for m in rows
+            for m in store.list_messages(conversation_id)
         ],
     }
 
@@ -333,14 +298,12 @@ def get_conversation(
 def delete_conversation(
     conversation_id: str,
     request: Request,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
+    user: UserRecord = Depends(current_user),
 ):
-    conversation = db.get(Conversation, conversation_id)
+    store = get_repo()
+    conversation = store.get_conversation(conversation_id)
     if conversation is None or conversation.user_id != user.id:
         raise HTTPException(status_code=404, detail="Conversation not found.")
-    db.query(Message).filter(Message.conversation_id == conversation_id).delete()
-    db.delete(conversation)
-    db.commit()
-    audit.log(db, "conversation_deleted", user=user, target=conversation_id, request=request)
+    store.delete_conversation(conversation_id)
+    audit.log("conversation_deleted", user=user, target=conversation_id, request=request)
     return {"ok": True}

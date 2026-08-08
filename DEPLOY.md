@@ -1,149 +1,156 @@
 # Deploying
 
-Two halves, two places.
+**Frontend → Vercel.** Already live at https://baldridge-assistant.vercel.app
 
-**Frontend → Vercel.** Static Next.js, no state. Live at
-https://baldridge-assistant.vercel.app
+**Backend → Cloud Run, data → Firestore, files → Cloud Storage.** This is the
+version that runs without your laptop.
 
-**Backend → a normal Linux server.** Any VPS will do — DigitalOcean, Hetzner,
-Linode, Vultr, or a box at the Lodge with a static IP. The smallest tier is
-enough: 1 vCPU / 1 GB RAM handles a few dozen staff comfortably.
-
-It needs an ordinary server rather than a serverless host because:
-
-- SQLite lives on disk, and the audit log has to survive restarts.
-- `storage/` holds the original uploaded files.
-- The retrieval index is built once at startup and held in memory. A process
-  that gets torn down between requests would rebuild all 645 chunks every time.
+Cost: the free tiers cover a nonprofit's usage comfortably (Cloud Run bills
+per request and scales to zero; Firestore gives 50k reads and 20k writes a
+day). A billing account with a card is required to enable Cloud Run, but you
+should expect $0 apart from Anthropic API usage. **Set a budget alert anyway.**
 
 ---
 
-## 1 · Point DNS at the server
-
-Create an A record for the API before running anything, so Caddy can get a
-certificate on first start:
-
-```
-api.baldridgelodge.org.   A   <your server IP>
-```
-
-## 2 · Install
-
-Copy the project to the server and run the installer:
+## 1 · Create the project
 
 ```bash
-scp -r ~/baldridge-assistant root@<server-ip>:/root/
+brew install --cask google-cloud-sdk && gcloud init
 ```
 
 ```bash
-ssh root@<server-ip> "cd /root/baldridge-assistant && bash deploy/install.sh api.baldridgelodge.org"
+gcloud projects create baldridge-assistant --name="Bald Ridge Assistant"
 ```
 
-That script installs Python and Caddy, creates an unprivileged `baldridge`
-service account, builds the virtualenv, installs the systemd unit, configures
-HTTPS, and opens only ports 22/80/443. It is safe to re-run — it never
-overwrites `.env`, the database, or `storage/`.
-
-## 3 · Configure
+Link billing in the console, then:
 
 ```bash
-ssh root@<server-ip> "nano /opt/baldridge/backend/.env"
+gcloud config set project baldridge-assistant && gcloud services enable run.googleapis.com firestore.googleapis.com storage.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
 ```
 
-At minimum set:
-
-```
-ANTHROPIC_API_KEY=<your rotated key>
-CORS_ORIGINS=https://baldridge-assistant.vercel.app
-```
-
-`SECRET_KEY` was generated for you by the installer. `CORS_ORIGINS` is also
-what builds invitation links, so it must be the real frontend URL.
-
-Then restart and create the administrator:
+## 2 · Firestore and the bucket
 
 ```bash
-ssh root@<server-ip> "systemctl restart baldridge-api"
+gcloud firestore databases create --location=nam5
 ```
 
 ```bash
-ssh root@<server-ip> "cd /opt/baldridge/backend && sudo -u baldridge venv/bin/python create_admin.py"
+gcloud storage buckets create gs://baldridge-documents --location=us-east1 --uniform-bucket-level-access
 ```
 
-The local database does not travel with the deploy — this account is separate
-from the one on your laptop.
-
-Check it:
+Composite indexes (queries that filter on two fields need these):
 
 ```bash
-curl https://api.baldridgelodge.org/health
+cd ~/baldridge-assistant && firebase deploy --only firestore:indexes --project baldridge-assistant
 ```
 
-## 4 · Point the frontend at it
+If you skip that, the first admin-stats or filtered-audit call fails with an
+error containing a link that creates the missing index for you.
+
+## 3 · Deploy
+
+```bash
+cd ~/baldridge-assistant/backend && gcloud run deploy baldridge-api --source . --region us-east1 --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 1Gi --cpu 1 --timeout 300
+```
+
+`--max-instances 1` is deliberate. The retrieval index lives in each instance's
+memory, so a second instance would hold a stale copy after an upload until it
+restarted. One instance handles a few dozen staff fine; raise it only if you
+add index invalidation.
+
+Then set configuration:
+
+```bash
+gcloud run services update baldridge-api --region us-east1 --update-env-vars "REPO_BACKEND=firestore,GCS_BUCKET=baldridge-documents,FIRESTORE_PROJECT=baldridge-assistant,ORG_NAME=Bald Ridge Lodge,ORG_PHONE=770-887-1220,ORG_EMAIL=adikes@baldridgelodge.org,CORS_ORIGINS=https://baldridge-assistant.vercel.app,TWOFA_EXEMPT_EMAILS=adikes@baldridgelodge.org"
+```
+
+The API key belongs in Secret Manager, not an env var:
+
+```bash
+printf 'sk-ant-YOUR-ROTATED-KEY' | gcloud secrets create anthropic-key --data-file=- && gcloud run services update baldridge-api --region us-east1 --update-secrets=ANTHROPIC_API_KEY=anthropic-key:latest
+```
+
+`SECRET_KEY` the same way — generate one with
+`python3 -c "import secrets; print(secrets.token_urlsafe(48))"`.
+
+Grant the service account access to Firestore and the bucket:
+
+```bash
+gcloud projects add-iam-policy-binding baldridge-assistant --member="serviceAccount:$(gcloud run services describe baldridge-api --region us-east1 --format='value(spec.template.spec.serviceAccountName)')" --role=roles/datastore.user
+```
+
+## 4 · Move your existing library across
+
+Everything currently on your laptop — the admin account, the RBWO standards,
+645 chunks, the audit log — copies over in one command:
+
+```bash
+cd ~/baldridge-assistant/backend && FIRESTORE_PROJECT=baldridge-assistant GCS_BUCKET=baldridge-documents ./venv/bin/python migrate_to_firestore.py --files
+```
+
+Run `--dry-run` first to see the counts. It is idempotent — re-running
+overwrites rather than duplicating.
+
+## 5 · Point the frontend at it
 
 ```bash
 cd ~/baldridge-assistant/frontend && vercel env add NEXT_PUBLIC_API_BASE production
 ```
 
-Paste the API URL (no trailing slash), then redeploy:
+Paste the Cloud Run URL (`gcloud run services describe baldridge-api
+--region us-east1 --format='value(status.url)'`), then:
 
 ```bash
 cd ~/baldridge-assistant/frontend && vercel deploy --prod --yes
 ```
 
-## 5 · Upload the documents
+---
 
-Sign in to the deployed site, go to **Documents**, and upload the RBWO
-standards PDF. It re-chunks in about a minute. The library on your laptop is
-not the library on the server.
+## What to expect
+
+**Cold starts.** With `--min-instances 0` the container sleeps when idle. The
+first question after a quiet period waits while the index rebuilds — reading
+645 chunks from Firestore and fitting TF-IDF/SVD, roughly 15–25 seconds. Every
+question after that is fast. If that first-question delay is unacceptable,
+`--min-instances 1` removes it but runs the container continuously, which does
+cost a few dollars a month.
+
+**Adding documents still works the same.** Upload through the Documents page;
+chunks go to Firestore and the index rebuilds in the running instance
+immediately. No redeploy, no retraining.
+
+**Free-tier headroom.** A 645-chunk upload is 645 writes against a 20k/day
+allowance, so roughly 30 documents that size per day. Reads are 645 per cold
+start against 50k/day.
 
 ---
 
-## Operating it
+## Running locally
+
+Unchanged. `REPO_BACKEND` defaults to `sqlite`, so `./start.sh` needs no cloud
+account and no credentials. That is also what the test suite runs against:
 
 ```bash
-systemctl status baldridge-api        # is it up
-journalctl -u baldridge-api -f        # live logs
-systemctl restart baldridge-api       # after an .env change
+cd backend && ./venv/bin/python selftest.py
 ```
 
-**Back up these two paths.** They are the whole system:
-
-```
-/opt/baldridge/backend/data/      # accounts, audit log, document text
-/opt/baldridge/backend/storage/   # original uploaded files
-```
+To point local development at Firestore instead:
 
 ```bash
-ssh root@<server-ip> "tar czf - /opt/baldridge/backend/data /opt/baldridge/backend/storage" > baldridge-backup-$(date +%F).tar.gz
-```
-
-Deploying an update:
-
-```bash
-scp -r ~/baldridge-assistant root@<server-ip>:/root/ && \
-ssh root@<server-ip> "cd /root/baldridge-assistant && bash deploy/install.sh api.baldridgelodge.org"
+export REPO_BACKEND=firestore FIRESTORE_PROJECT=baldridge-assistant && gcloud auth application-default login
 ```
 
 ---
 
-## Before you tell staff about it
+## Before staff use it
 
-- [ ] **Rotate the Anthropic API key.** The current one was pasted into a chat
-      transcript. Generate a new one at console.anthropic.com and put it only
-      in the server's `.env`.
-- [ ] Confirm backups run. Everything lives in those two directories.
-- [ ] `TWOFA_EXEMPT_EMAILS` is set, so that account signs in on password alone.
-      On a public URL that password is the only thing between the internet and
-      every document, including leadership-only files. Use a long unique one;
-      delete the line to turn 2FA back on.
-- [ ] Decide what does **not** go in the library. Resident records, case files,
-      and medical information should not be uploaded. The PII scanner flags
-      them, but it is a safety net, not a policy.
-
-## If you'd rather use Docker
-
-`backend/Dockerfile` builds the same thing and runs anywhere containers do.
-Mount a volume at `/data`. Note it has not been built or tested — there is no
-Docker on the machine this was developed on, so treat it as a starting point
-rather than a verified path. The systemd route above is the tested one.
+- [ ] **Rotate the Anthropic API key** — the current one is in a chat
+      transcript. Put the replacement in Secret Manager only.
+- [ ] Set a billing budget alert at, say, $5 so nothing can surprise you.
+- [ ] `TWOFA_EXEMPT_EMAILS` means that account signs in on password alone. On a
+      public URL that password is the only thing protecting every document.
+      Delete the variable to turn 2FA back on.
+- [ ] Firestore has no backups on the free tier. Export periodically:
+      `gcloud firestore export gs://baldridge-documents/backups/$(date +%F)`
+- [ ] Resident records, case files, and medical information should not be
+      uploaded. The PII scanner flags them; it is a safety net, not a policy.

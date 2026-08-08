@@ -10,10 +10,8 @@ import numpy as np
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
-from sqlalchemy.orm import Session
 
 from config import settings
-from models import Chunk, Document
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
@@ -184,26 +182,29 @@ class HybridIndex:
 
     # ------------------------------------------------------------ build
 
-    def rebuild(self, db: Session) -> int:
-        rows = (
-            db.query(Chunk, Document)
-            .join(Document, Chunk.document_id == Document.id)
-            .filter(Document.is_active.is_(True))
-            .all()
-        )
+    def rebuild(self, store=None) -> int:
+        """Rebuilds from every active chunk in the store.
+
+        Takes the repo rather than a database session so the index does not
+        care whether the chunks came from SQLite or Firestore.
+        """
+        if store is None:
+            from repo import get_repo
+
+            store = get_repo()
         entries = [
             _Entry(
-                chunk_id=chunk.id,
-                document_id=doc.id,
-                document_title=doc.title,
-                category=doc.category,
-                visibility=doc.visibility,
-                heading=chunk.heading,
-                page=chunk.page,
-                text=chunk.text,
-                tokens=tokenize(f"{doc.title} {chunk.heading} {chunk.text}"),
+                chunk_id=c.id,
+                document_id=c.document_id,
+                document_title=c.document_title,
+                category=c.category,
+                visibility=c.visibility,
+                heading=c.heading,
+                page=c.page,
+                text=c.text,
+                tokens=tokenize(f"{c.document_title} {c.heading} {c.text}"),
             )
-            for chunk, doc in rows
+            for c in store.iter_active_chunks()
         ]
 
         with self._lock:

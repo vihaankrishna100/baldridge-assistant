@@ -23,10 +23,10 @@ from llm import NO_ANSWER, build_user_turn, validate_citations  # noqa: E402
 from models import (  # noqa: E402
     VISIBILITY_LEADERSHIP,
     VISIBILITY_STAFF,
-    Chunk,
-    Document,
     visible_tiers_for_role,
 )
+from repo.base import ChunkRecord, DocumentRecord  # noqa: E402
+from repo.sqlite_repo import SqliteRepo  # noqa: E402
 from rag.chunker import chunk_pages  # noqa: E402
 from rag.index import HybridIndex  # noqa: E402
 from rag.redact import scan  # noqa: E402
@@ -72,32 +72,36 @@ November using comparable data from similar sized nonprofits in the region.""",
 
 
 def build_index():
-    db = database.SessionLocal()
+    """Exercises the real repository, so the store interface is under test too."""
+    store = SqliteRepo()
+    store.bootstrap()
     for title, visibility, text in CORPUS:
-        doc = Document(
+        doc = DocumentRecord(
             title=title,
             filename=f"{title}.txt",
             category="Policies",
             visibility=visibility,
             uploaded_by="test",
         )
-        db.add(doc)
-        db.flush()
-        for proto in chunk_pages([(None, text)]):
-            db.add(
-                Chunk(
-                    document_id=doc.id,
-                    ordinal=proto.ordinal,
-                    heading=proto.heading,
-                    page=proto.page,
-                    text=proto.text,
-                )
+        chunks = [
+            ChunkRecord(
+                document_id=doc.id,
+                ordinal=proto.ordinal,
+                heading=proto.heading,
+                page=proto.page,
+                text=proto.text,
+                document_title=doc.title,
+                category=doc.category,
+                visibility=doc.visibility,
+                document_active=True,
             )
-    db.commit()
+            for proto in chunk_pages([(None, text)])
+        ]
+        doc.chunk_count = len(chunks)
+        store.create_document(doc, chunks)
 
     idx = HybridIndex()
-    n = idx.rebuild(db)
-    db.close()
+    n = idx.rebuild(store)
     return idx, n
 
 

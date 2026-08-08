@@ -1,7 +1,8 @@
-# The API needs a real filesystem (SQLite + the original uploaded files) and a
-# long-lived process (the retrieval index is held in memory and rebuilt only on
-# document change). That rules out serverless; this image runs anywhere that
-# gives it a persistent volume — Railway, Render, Fly.io, or a plain VPS.
+# Cloud Run image.
+#
+# With REPO_BACKEND=firestore there is no local state to preserve: accounts,
+# documents and chunks live in Firestore, originals in Cloud Storage. That is
+# what makes a scale-to-zero container acceptable here.
 FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -10,21 +11,23 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Dependencies first so code edits don't reinstall scipy every build.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Mount a volume here. Losing it means losing every account, the audit trail,
-# and the document library.
-ENV DATABASE_URL=sqlite:////data/baldridge.db \
-    STORAGE_DIR=/data/storage
-VOLUME ["/data"]
+ENV REPO_BACKEND=firestore
 
-EXPOSE 8000
-
-# Single worker on purpose: the retrieval index is per-process, so N workers
-# would mean N copies of it and a rebuild storm on every upload. Scale by
-# giving this one container more CPU, not more workers.
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+# Cloud Run injects PORT. One worker on purpose: the retrieval index is held in
+# this process's memory, so a second worker would mean a second copy of it and
+# a second rebuild on every cold start. Scale with instances, not workers.
+#
+# --timeout-keep-alive is raised because answers stream token by token and an
+# idle-looking connection during a long generation must not be dropped.
+CMD exec uvicorn main:app \
+    --host 0.0.0.0 \
+    --port ${PORT:-8080} \
+    --workers 1 \
+    --timeout-keep-alive 120 \
+    --proxy-headers \
+    --forwarded-allow-ips='*'

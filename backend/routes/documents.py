@@ -1,48 +1,38 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
 
 import audit
+from blobs import get_blobs
 from config import settings
-from database import get_db
 from deps import current_user, require_leadership
-from models import (
-    VISIBILITIES,
-    VISIBILITY_STAFF,
-    Chunk,
-    Document,
-    User,
-    visible_tiers_for_role,
-)
+from models import VISIBILITIES, VISIBILITY_STAFF, visible_tiers_for_role
 from rag import redact
 from rag.chunker import chunk_pages
 from rag.extract import ExtractionError, extract
 from rag.index import index
+from repo import get_repo
+from repo.base import ChunkRecord, DocumentRecord, UserRecord, utcnow
 from schemas import DocumentOut, DocumentUpdate
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-def _now():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
 @router.get("", response_model=list[DocumentOut])
 def list_documents(
     include_inactive: bool = False,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
+    user: UserRecord = Depends(current_user),
 ):
     tiers = visible_tiers_for_role(user.role)
-    q = db.query(Document).filter(Document.visibility.in_(tiers))
-    if not include_inactive or user.role == "staff":
-        q = q.filter(Document.is_active.is_(True))
-    docs = q.order_by(Document.category, Document.title).all()
+    show_retired = include_inactive and user.role != "staff"
+    docs = [
+        d
+        for d in get_repo().list_documents(include_inactive=show_retired)
+        if d.visibility in tiers
+    ]
     return [DocumentOut.model_validate(d) for d in docs]
 
 
@@ -54,9 +44,10 @@ async def upload_document(
     category: str = Form("General"),
     visibility: str = Form(VISIBILITY_STAFF),
     replaces: str = Form(""),
-    user: User = Depends(require_leadership),
-    db: Session = Depends(get_db),
+    user: UserRecord = Depends(require_leadership),
 ):
+    store = get_repo()
+
     if visibility not in VISIBILITIES:
         raise HTTPException(status_code=400, detail="Unknown visibility level.")
     if visibility != VISIBILITY_STAFF and user.role not in ("leadership", "admin"):
@@ -79,11 +70,7 @@ async def upload_document(
     full_text = "\n\n".join(text for _, text in pages)
     checksum = hashlib.sha256(data).hexdigest()
 
-    duplicate = (
-        db.query(Document)
-        .filter(Document.checksum == checksum, Document.is_active.is_(True))
-        .one_or_none()
-    )
+    duplicate = store.find_active_document_by_checksum(checksum)
     if duplicate and not replaces:
         raise HTTPException(
             status_code=409,
@@ -96,18 +83,19 @@ async def upload_document(
 
     version = 1
     if replaces:
-        previous = db.get(Document, replaces)
+        previous = store.get_document(replaces)
         if previous is None:
             raise HTTPException(status_code=404, detail="The document being replaced no longer exists.")
         previous.is_active = False
-        previous.updated_at = _now()
+        previous.updated_at = utcnow()
+        store.update_document(previous)
         version = previous.version + 1
         audit.log(
-            db, "document_superseded", user=user, target=previous.title,
-            detail=f"replaced by v{version}", request=request, commit=False,
+            "document_superseded", user=user, target=previous.title,
+            detail=f"replaced by v{version}", request=request,
         )
 
-    doc = Document(
+    doc = DocumentRecord(
         title=(title.strip() or (file.filename or "Untitled")),
         filename=file.filename or "upload",
         content_type=file.content_type or "",
@@ -121,28 +109,29 @@ async def upload_document(
         pii_flags=", ".join(redact.scan(full_text)),
         uploaded_by=user.id,
     )
-    db.add(doc)
-    db.flush()
 
-    for proto in proto_chunks:
-        db.add(
-            Chunk(
-                document_id=doc.id,
-                ordinal=proto.ordinal,
-                heading=proto.heading[:300],
-                page=proto.page,
-                text=proto.text,
-            )
+    chunks = [
+        ChunkRecord(
+            document_id=doc.id,
+            ordinal=p.ordinal,
+            heading=p.heading[:300],
+            page=p.page,
+            text=p.text,
+            document_title=doc.title,
+            category=doc.category,
+            visibility=doc.visibility,
+            document_active=True,
         )
+        for p in proto_chunks
+    ]
 
-    # Original file kept so leadership can download exactly what was approved.
-    (settings.storage_path / f"{doc.id}").write_bytes(data)
-
-    db.commit()
-    index.rebuild(db)
+    # Original kept so leadership can download exactly what was approved.
+    get_blobs().put(doc.id, data)
+    store.create_document(doc, chunks)
+    index.rebuild()
 
     audit.log(
-        db, "document_uploaded", user=user, target=doc.title,
+        "document_uploaded", user=user, target=doc.title,
         detail=f"{doc.chunk_count} chunks, visibility={doc.visibility}"
         + (f", PII review: {doc.pii_flags}" if doc.pii_flags else ""),
         request=request,
@@ -155,10 +144,10 @@ def update_document(
     document_id: str,
     payload: DocumentUpdate,
     request: Request,
-    user: User = Depends(require_leadership),
-    db: Session = Depends(get_db),
+    user: UserRecord = Depends(require_leadership),
 ):
-    doc = db.get(Document, document_id)
+    store = get_repo()
+    doc = store.get_document(document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found.")
 
@@ -178,11 +167,11 @@ def update_document(
         doc.is_active = payload.is_active
         changes.append("active" if payload.is_active else "retired")
 
-    doc.updated_at = _now()
-    db.commit()
-    index.rebuild(db)
+    doc.updated_at = utcnow()
+    store.update_document(doc)
+    index.rebuild()
     audit.log(
-        db, "document_updated", user=user, target=doc.title,
+        "document_updated", user=user, target=doc.title,
         detail=", ".join(changes), request=request,
     )
     return DocumentOut.model_validate(doc)
@@ -192,22 +181,18 @@ def update_document(
 def delete_document(
     document_id: str,
     request: Request,
-    user: User = Depends(require_leadership),
-    db: Session = Depends(get_db),
+    user: UserRecord = Depends(require_leadership),
 ):
-    doc = db.get(Document, document_id)
+    store = get_repo()
+    doc = store.get_document(document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found.")
     title = doc.title
 
-    stored = settings.storage_path / document_id
-    if stored.exists():
-        stored.unlink()
-
-    db.delete(doc)  # chunks cascade
-    db.commit()
-    index.rebuild(db)
-    audit.log(db, "document_deleted", user=user, target=title, request=request)
+    get_blobs().delete(document_id)
+    store.delete_document(document_id)
+    index.rebuild()
+    audit.log("document_deleted", user=user, target=title, request=request)
     return {"ok": True}
 
 
@@ -215,24 +200,23 @@ def delete_document(
 def download_document(
     document_id: str,
     request: Request,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
+    user: UserRecord = Depends(current_user),
 ):
-    doc = db.get(Document, document_id)
+    doc = get_repo().get_document(document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found.")
     if doc.visibility not in visible_tiers_for_role(user.role):
         # Same 404 as a missing document — a 403 would confirm it exists.
-        audit.log(db, "document_access_denied", user=user, target=doc.id, request=request)
+        audit.log("document_access_denied", user=user, target=doc.id, request=request)
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    path = settings.storage_path / document_id
-    if not path.exists():
+    data = get_blobs().get(document_id)
+    if data is None:
         raise HTTPException(status_code=410, detail="The original file is no longer stored.")
 
-    audit.log(db, "document_downloaded", user=user, target=doc.title, request=request)
+    audit.log("document_downloaded", user=user, target=doc.title, request=request)
     return Response(
-        content=path.read_bytes(),
+        content=data,
         media_type=doc.content_type or "application/octet-stream",
         headers={
             "Content-Disposition": f'attachment; filename="{doc.filename}"',
@@ -242,11 +226,7 @@ def download_document(
 
 
 @router.post("/reindex")
-def reindex(
-    request: Request,
-    user: User = Depends(require_leadership),
-    db: Session = Depends(get_db),
-):
-    count = index.rebuild(db)
-    audit.log(db, "reindex", user=user, detail=f"{count} chunks", request=request)
+def reindex(request: Request, user: UserRecord = Depends(require_leadership)):
+    count = index.rebuild()
+    audit.log("reindex", user=user, detail=f"{count} chunks", request=request)
     return {"ok": True, **index.stats()}

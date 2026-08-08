@@ -5,21 +5,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
-from database import Base, SessionLocal, engine, run_migrations
 from rag.index import index
+from repo import get_repo
 from routes import admin, auth, chat, documents
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    run_migrations()
-    db = SessionLocal()
-    try:
-        count = index.rebuild(db)
-        print(f"[startup] retrieval index ready — {count} chunks")
-    finally:
-        db.close()
+    store = get_repo()
+    store.bootstrap()
+    print(f"[startup] store: {type(store).__name__}")
+    count = index.rebuild(store)
+    print(f"[startup] retrieval index ready — {count} chunks")
     if not settings.anthropic_api_key:
         print("[startup] WARNING: ANTHROPIC_API_KEY is not set; /chat/ask will fail")
     if not (settings.org_phone or settings.org_email):
