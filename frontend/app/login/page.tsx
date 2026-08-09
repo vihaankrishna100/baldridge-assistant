@@ -94,7 +94,7 @@ function LoginForm() {
       <div className="grid min-h-screen place-items-center px-5 py-10">
       <div className="w-full max-w-md">
         <Link href="/" className="mb-8 inline-flex">
-          <Logo size="lg" />
+          <Logo lockup size="lg" />
         </Link>
 
         <div className="lit animate-fade-up rounded-2xl border border-line bg-card/85 p-7 shadow-2xl shadow-black/40">
