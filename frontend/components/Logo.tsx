@@ -9,31 +9,29 @@
  */
 export function LogoMark({ className = "h-9 w-9" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
-      {/* frame */}
+    <svg viewBox="0 0 100 100" className={className} aria-hidden="true">
+      {/* The clever bit of this mark: the square's left edge doubles as the B's
+          spine. The two bowls run straight into it rather than sitting inside
+          a box, which is why it reads as one object. Lower bowl is wider than
+          the upper. */}
       <rect
-        x="10"
-        y="7"
-        width="46"
-        height="50"
+        x="8"
+        y="8"
+        width="84"
+        height="84"
         fill="none"
         stroke="currentColor"
-        strokeWidth="3"
+        strokeWidth="5"
       />
-      {/* crossbar, breaking through the frame on the left */}
-      <rect x="2" y="28.5" width="26" height="7" fill="currentColor" />
-      {/* stem */}
-      <rect x="21" y="16" width="8" height="32" fill="currentColor" />
-      {/* upper bowl */}
-      <path
-        d="M29 16h9a7.5 7.5 0 0 1 0 15h-9z"
-        fill="currentColor"
-      />
-      {/* lower bowl, slightly wider — the way the original sits */}
-      <path
-        d="M29 33h11a7.5 7.5 0 0 1 0 15H29z"
-        fill="currentColor"
-      />
+      <path d="M10.5 23 h44 a14 14 0 0 1 0 28 h-44 z" fill="currentColor" />
+      <path d="M10.5 55 h52 a14.5 14.5 0 0 1 0 29 h-52 z" fill="currentColor" />
+      {/* Counters are painted rather than knocked out, because currentColor
+          can't be inverted. Override --logo-knockout wherever the mark sits on
+          a surface other than the page background. */}
+      <g fill="var(--logo-knockout, #070d18)">
+        <rect x="27" y="31" width="26" height="12" />
+        <rect x="27" y="63" width="34" height="13" />
+      </g>
     </svg>
   );
 }

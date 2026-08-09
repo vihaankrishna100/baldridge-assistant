@@ -84,6 +84,74 @@ def tokenize(text: str) -> list[str]:
     ]
 
 
+# Staff type how they speak, not how a regulation is written. "A kid ran off"
+# has to reach a standard that says "absent without permission"; without this
+# the passage is never retrieved and the assistant hands over a phone number
+# for something the documents plainly cover.
+#
+# Query-side only — documents are never rewritten. Each entry adds terms, so a
+# miss costs nothing and a hit costs one extra token in the query vector.
+SYNONYMS: dict[str, tuple[str, ...]] = {
+    # who
+    "kid": ("child", "youth", "resident"),
+    "teen": ("youth", "adolescent", "child"),
+    "boy": ("child", "youth", "resident"),
+    "client": ("child", "youth", "resident"),
+    # leaving without permission
+    "ran": ("runaway", "absent", "permission"),
+    "run": ("runaway", "absent", "permission"),
+    "runaway": ("absent", "permission", "premises"),
+    "awol": ("runaway", "absent", "permission"),
+    "eloped": ("runaway", "absent", "permission"),
+    "fled": ("runaway", "absent", "permission"),
+    "missing": ("runaway", "absent", "permission"),
+    "escaped": ("runaway", "absent", "premises"),
+    # paperwork
+    "writeup": ("incident", "report"),
+    "paperwork": ("document", "report", "form"),
+    "log": ("document", "record", "report"),
+    "file": ("document", "submit", "report"),
+    # people and roles
+    "boss": ("supervisor", "director"),
+    "manager": ("supervisor", "director"),
+    "coworker": ("staff", "employee"),
+    # medical
+    "meds": ("medication", "medical"),
+    "med": ("medication", "medical"),
+    "doctor": ("medical", "physician", "health"),
+    "sick": ("medical", "health", "illness"),
+    "hurt": ("injury", "medical"),
+    "injured": ("injury", "medical"),
+    # behaviour
+    "fight": ("altercation", "behavior", "incident"),
+    "fighting": ("altercation", "behavior", "incident"),
+    "hit": ("physical", "altercation", "incident"),
+    "restrain": ("restraint", "seclusion", "physical"),
+    "timeout": ("seclusion", "behavior"),
+    "punish": ("discipline", "punishment", "behavior"),
+    # time off / employment
+    "pto": ("leave", "time", "off"),
+    "vacation": ("leave", "time", "off"),
+    "hire": ("employment", "staff", "hiring"),
+    "fired": ("termination", "employment"),
+    "training": ("train", "orientation", "education"),
+    # money
+    "money": ("funds", "expense", "purchase"),
+    "buy": ("purchase", "expense"),
+    "spend": ("purchase", "expense", "funds"),
+    "reimburse": ("expense", "purchase", "funds"),
+}
+
+
+def expand(tokens: list[str]) -> list[str]:
+    """Adds domain synonyms for terms the query actually used."""
+    extra: list[str] = []
+    for t in tokens:
+        for alt in SYNONYMS.get(t, ()):  # stems below, so both sides match
+            extra.append(stem(alt))
+    return tokens + extra
+
+
 def analyze(text: str) -> list[str]:
     """Unigrams + bigrams from the same tokenizer BM25 uses.
 
@@ -278,10 +346,12 @@ class HybridIndex:
             if not permitted.any():
                 return []
 
-            q_tokens = tokenize(query)
+            q_tokens = expand(tokenize(query))
             bm25 = self._bm25.scores(q_tokens)
 
-            q_vec = self._vectorizer.transform([query])
+            # The vectorizer runs `analyze` itself, so the expanded terms are
+            # handed to it as text rather than re-tokenised.
+            q_vec = self._vectorizer.transform([query + " " + " ".join(q_tokens)])
             lexical = np.asarray((self._tfidf @ q_vec.T).todense()).ravel()
 
             if self._dense is not None and self._svd is not None:
