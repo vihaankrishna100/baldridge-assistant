@@ -49,8 +49,10 @@ export default function HeroCard() {
       <div className="lit relative rounded-2xl border border-line bg-card/95 p-6 shadow-2xl shadow-black/55 backdrop-blur-sm sm:p-7">
         <div className="flex items-center justify-between gap-4">
           <span className="flex items-center gap-2.5 rounded-xl border border-line-soft bg-ink/60 px-3 py-2">
-            <LogoMark className="h-6 w-6" glow={false} />
-            <span className="display whitespace-nowrap text-[13px] text-text">Bald Ridge Lodge</span>
+            <LogoMark className="h-6 w-6 text-text" />
+            <span className="text-[12.5px] font-semibold tracking-[0.02em] whitespace-nowrap text-text uppercase">
+              Bald Ridge Lodge
+            </span>
           </span>
           <span className="flex shrink-0 items-center gap-2 rounded-full border border-mint/25 bg-mint/10 px-3 py-1.5 text-[11px] font-medium whitespace-nowrap text-mint">
             <span className="h-1.5 w-1.5 rounded-full bg-mint" />

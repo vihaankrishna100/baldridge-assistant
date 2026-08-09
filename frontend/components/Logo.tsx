@@ -1,63 +1,39 @@
 /**
- * The mark reads two ways on purpose: a ridgeline of hills, and the pitched
- * roof of a lodge. The warm dot beneath is the lit window — the place is open,
- * somebody is awake. Beats stamping "BR" in a rounded square.
+ * Bald Ridge Lodge's own mark: a bold B set inside a square frame, with the
+ * crossbar breaking out through the left edge.
+ *
+ * Drawn as geometry rather than an image file so it stays crisp at every size
+ * and needs no network fetch. If the Lodge supplies the original artwork, drop
+ * it in `public/` and swap this component's body for an <img> — the rest of
+ * the app only ever calls <LogoMark /> and <Logo />.
  */
-export function LogoMark({
-  className = "h-9 w-9",
-  glow = true,
-}: {
-  className?: string;
-  glow?: boolean;
-}) {
+export function LogoMark({ className = "h-9 w-9" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 40 40" className={className} aria-hidden="true">
-      <defs>
-        <linearGradient id="ridge-stroke" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#38d9f0" />
-          <stop offset="100%" stopColor="#6d76f5" />
-        </linearGradient>
-        <radialGradient id="ridge-lamp">
-          <stop offset="0%" stopColor="#f0a63c" stopOpacity="0.85" />
-          <stop offset="100%" stopColor="#f0a63c" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      {/* frame */}
       <rect
-        x="1.5"
-        y="1.5"
-        width="37"
-        height="37"
-        rx="11"
-        fill="#0c1424"
-        stroke="url(#ridge-stroke)"
-        strokeWidth="1.4"
-        strokeOpacity="0.55"
-      />
-
-      {glow && <circle cx="20" cy="27" r="10" fill="url(#ridge-lamp)" />}
-
-      {/* back ridge */}
-      <path
-        d="M7 25.5 L15.5 15 L21 21.5"
+        x="10"
+        y="7"
+        width="46"
+        height="50"
         fill="none"
-        stroke="#6d76f5"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeOpacity="0.6"
+        stroke="currentColor"
+        strokeWidth="3"
       />
-      {/* front ridge / roofline */}
+      {/* crossbar, breaking through the frame on the left */}
+      <rect x="2" y="28.5" width="26" height="7" fill="currentColor" />
+      {/* stem */}
+      <rect x="21" y="16" width="8" height="32" fill="currentColor" />
+      {/* upper bowl */}
       <path
-        d="M12 27 L22.5 13.5 L33 27"
-        fill="none"
-        stroke="url(#ridge-stroke)"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M29 16h9a7.5 7.5 0 0 1 0 15h-9z"
+        fill="currentColor"
       />
-      {/* the lit window */}
-      <circle cx="22.5" cy="24" r="2.1" fill="#f0a63c" />
+      {/* lower bowl, slightly wider — the way the original sits */}
+      <path
+        d="M29 33h11a7.5 7.5 0 0 1 0 15H29z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -65,22 +41,40 @@ export function LogoMark({
 export default function Logo({
   size = "md",
   subtitle = "Internal Assistant",
+  stacked = false,
 }: {
   size?: "sm" | "md" | "lg";
   subtitle?: string | null;
+  /** Three-line wordmark, as the Lodge sets it. Needs vertical room. */
+  stacked?: boolean;
 }) {
-  const mark = size === "lg" ? "h-12 w-12" : size === "sm" ? "h-8 w-8" : "h-9 w-9";
-  const title = size === "lg" ? "text-lg" : "text-[15px]";
+  const mark = size === "lg" ? "h-14 w-14" : size === "sm" ? "h-8 w-8" : "h-10 w-10";
+  const type =
+    size === "lg" ? "text-[19px]" : size === "sm" ? "text-[13px]" : "text-[15px]";
 
   return (
     <span className="flex items-center gap-3">
-      <LogoMark className={mark} />
-      <span className="leading-tight">
-        <span className={`display block whitespace-nowrap ${title} text-text`}>
-          Bald Ridge Lodge
-        </span>
+      <LogoMark className={`${mark} shrink-0 text-text`} />
+      <span className="leading-none">
+        {stacked ? (
+          <span
+            className={`block font-semibold tracking-[0.01em] text-text uppercase ${type} leading-[1.06]`}
+          >
+            Bald
+            <br />
+            Ridge
+            <br />
+            Lodge
+          </span>
+        ) : (
+          <span
+            className={`block font-semibold tracking-[0.02em] whitespace-nowrap text-text uppercase ${type}`}
+          >
+            Bald Ridge Lodge
+          </span>
+        )}
         {subtitle && (
-          <span className="hidden font-mono text-[10px] tracking-[0.16em] text-faint uppercase sm:block">
+          <span className="mt-1.5 hidden font-mono text-[10px] tracking-[0.16em] text-faint uppercase sm:block">
             {subtitle}
           </span>
         )}

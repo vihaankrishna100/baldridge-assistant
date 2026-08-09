@@ -216,7 +216,7 @@ export default function LandingPage() {
               }}
             />
             <div className="relative">
-              <LogoMark className="mx-auto h-12 w-12" />
+              <LogoMark className="mx-auto h-14 w-14 text-text" />
               <h2 className="display-loose mt-6 text-[1.9rem] text-text">Need access?</h2>
               <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
                 Accounts are created by an administrator — there&apos;s no sign-up page. Ask
