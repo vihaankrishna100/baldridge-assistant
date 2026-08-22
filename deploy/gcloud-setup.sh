@@ -126,6 +126,10 @@ SECRET_KEY=$(grep -E '^SECRET_KEY=' backend/.env | cut -d= -f2- || true)
 put_secret session-key "$SECRET_KEY"
 
 # ---------------------------------------------------------------- deploy
+# --no-cpu-throttling matters more than it looks. Cloud Run only gives CPU
+# while a request is in flight by default, which starves the background thread
+# that builds the retrieval index — it took 94s to warm instead of 8. Without
+# this the first question after a cold start waits on a half-built index.
 say "building and deploying (first build takes a few minutes)"
 gcloud run deploy "$SERVICE" \
   --source backend \
@@ -135,6 +139,8 @@ gcloud run deploy "$SERVICE" \
   --max-instances 1 \
   --memory 1Gi \
   --cpu 1 \
+  --cpu-boost \
+  --no-cpu-throttling \
   --timeout 300 \
   --quiet
 
