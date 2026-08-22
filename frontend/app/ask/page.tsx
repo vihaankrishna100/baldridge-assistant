@@ -18,13 +18,17 @@ type Turn =
       citations: SourceRef[];
       streaming: boolean;
       escalation: Escalation | null;
+      general: boolean;
     };
 
+// Verified against the loaded corpus — a starter that returns "ask a
+// supervisor" is a bad first impression, so these are questions the documents
+// genuinely answer. Revisit when the library changes.
 const STARTERS = [
-  "What's the check-in procedure for volunteers?",
-  "How soon does an incident report need to be filed?",
-  "Who signs off on a purchase request?",
-  "What do I do if a resident misses curfew?",
+  "How soon must an incident report be filed?",
+  "What is the staff to child ratio for maximum watchful oversight?",
+  "How many face-to-face contacts a month do we need with each child?",
+  "Can we use a house parent model?",
 ];
 
 async function downloadDocument(id: string) {
@@ -76,6 +80,7 @@ export default function ChatPage() {
           citations: [],
           streaming: true,
           escalation: null,
+          general: false,
         },
       ]);
 
@@ -109,6 +114,7 @@ export default function ChatPage() {
             } else {
               if (typeof data.text === "string" && data.text) t.text = data.text;
               t.citations = (data.citations as SourceRef[]) ?? [];
+              t.general = data.general === true;
             }
           });
         },
@@ -175,6 +181,17 @@ export default function ChatPage() {
                     <EscalationCard data={turn.escalation} />
                   ) : (
                     <div className="lit rounded-2xl border border-line bg-card/80 p-6">
+                      {turn.general && !turn.streaming && (
+                        <p className="mb-4 flex items-start gap-2 rounded-lg border border-amber/30 bg-amber/[0.07] px-3 py-2 text-[12px] leading-relaxed text-amber">
+                          <svg viewBox="0 0 16 16" className="mt-px h-3.5 w-3.5 shrink-0" fill="currentColor" aria-hidden>
+                            <path d="M8 1.5A6.5 6.5 0 1 0 8 14.5 6.5 6.5 0 0 0 8 1.5Zm.75 9.75h-1.5v-1.5h1.5v1.5Zm0-2.75h-1.5v-4h1.5v4Z" />
+                          </svg>
+                          <span>
+                            General knowledge — <strong className="font-semibold">not from Bald Ridge
+                            documents</strong>. Follow the Lodge&apos;s own procedure where it differs.
+                          </span>
+                        </p>
+                      )}
                       <Answer
                         text={turn.text}
                         sources={turn.citations.length ? turn.citations : turn.sources}

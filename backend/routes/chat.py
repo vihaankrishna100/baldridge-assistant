@@ -169,17 +169,19 @@ def ask(
     reason = ""
     if is_meta:
         reason = "meta_query"
-    elif not index.stats()["chunks"]:
+    elif not index.wait_ready(timeout=90) or not index.stats()["chunks"]:
+        # wait_ready covers the cold-start window: without it a question asked
+        # while the index is still warming would look like an empty library.
         reason = "no_documents"
     else:
         hits = index.search(question, visible_tiers_for_role(user.role))
-        if not hits:
-            reason = "no_match"
-        # Hits are ordered by fused rank, not by confidence, so the best-matching
-        # passage is often not hits[0]. Gate on the strongest match in the set —
-        # reading hits[0] alone refuses questions the corpus clearly answers.
-        elif max(h.score for h in hits) < settings.retrieval_min_score:
-            reason = "low_confidence"
+        # No score gate here any more. A weak retrieval score means the corpus
+        # doesn't cover the question — but that is exactly the case where the
+        # answer might be ordinary world knowledge ("how many ounces in a cup"),
+        # which the model can answer and label. Refusing on score alone decided
+        # that before the model could look. The model now judges: it emits
+        # NO_ANSWER for an uncovered Bald Ridge question and GENERAL for world
+        # knowledge, and an uncited non-general answer is still discarded.
 
     history = _history_for(conversation_id)
     user_id, user_email = user.id, user.email
@@ -239,12 +241,14 @@ def ask(
             )
         )
         _log("question_answered", user_id, user_email, ip,
-             detail=f"{len(result.citations)} citations, score={top_score}",
+             detail=("general knowledge" if result.general else
+                     f"{len(result.citations)} citations, score={top_score}"),
              target=question[:200])
         yield _sse(
             "done",
             {
                 "escalated": False,
+                "general": result.general,
                 "citations": result.citations,
                 "conversation_id": conversation_id,
                 "text": result.text,

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, getToken, setToken } from "./api";
 
@@ -26,6 +26,7 @@ const AuthContext = createContext<AuthValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const settled = useRef(false);
   const router = useRouter();
 
   const refresh = useCallback(async () => {
@@ -45,12 +46,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Skip the verification round trip when signIn already gave us the user.
+    if (settled.current) return;
     void refresh();
   }, [refresh]);
 
   const signIn = useCallback((token: string, nextUser: User) => {
     setToken(token);
     setUser(nextUser);
+    // The login response already carried the full user, so the mount effect's
+    // /auth/me call would be a second round trip for data we hold. Marking the
+    // session as settled skips it.
+    setLoading(false);
+    settled.current = true;
   }, []);
 
   const signOut = useCallback(async () => {
@@ -61,6 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setToken(null);
     setUser(null);
+    settled.current = false;
     router.push("/login");
   }, [router]);
 

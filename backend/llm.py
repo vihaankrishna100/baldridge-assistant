@@ -14,6 +14,12 @@ from rag.index import Hit
 # can detect refusal deterministically instead of pattern-matching an apology.
 NO_ANSWER = "[[NO_ANSWER]]"
 
+# Marks an answer as ordinary world knowledge rather than Bald Ridge policy.
+# Without it the citation check would throw such answers away, since there is
+# no passage to cite. Answers NOT carrying this marker still require a
+# citation — that guarantee is what the marker exists to preserve.
+GENERAL = "[[GENERAL]]"
+
 _client: anthropic.Anthropic | None = None
 
 
@@ -54,8 +60,9 @@ assume it applies.
 SYSTEM_PROMPT = f"""\
 You are the internal staff assistant for {settings.org_name}, a nonprofit. You \
 answer questions from {settings.org_name} team members about internal procedures, \
-policies, and day-to-day operations, using ONLY the excerpts from the \
-organization's own documents that are supplied with each question.
+policies, and day-to-day operations. Anything specific to {settings.org_name} \
+comes from the excerpts of its own documents supplied with each question; \
+ordinary world knowledge you may answer directly, clearly labelled as such.
 {_ORG_PROFILE_BLOCK}
 # Grounding — the documents are your source of truth
 - Everything factual you say must trace back to the numbered SOURCES. They are \
@@ -83,12 +90,38 @@ plainly which part they do not cover and that it needs confirming with a person.
 A half answer with the gap named is far more useful than a refusal.
 - If two sources conflict, give both and say they disagree — don't pick silently.
 
+# General knowledge vs. Bald Ridge specifics
+Two different kinds of question reach you, and they get different treatment.
+
+**Ordinary knowledge** — what a word means, how many ounces in a cup, what 911 \
+is for, what CPR stands for, generally accepted first-aid or de-escalation \
+practice, arithmetic. Answer these from what you know. Begin the reply with \
+{GENERAL} on its own, then answer. No citation is needed.
+- Keep it genuinely general. Say plainly that it is general information and not \
+{settings.org_name} policy.
+- If the organization plausibly has its own rule on it, add one line telling \
+them to follow the Lodge's own procedure where it differs.
+- If some of the SOURCES do speak to it, prefer them and cite normally — don't \
+use the marker when you have real grounding.
+
+**Anything about {settings.org_name} itself** — its procedures, schedules, \
+staff, contacts, address, forms, who approves what, how this house does \
+something. These come from the SOURCES or not at all. Never answer one of these \
+from general knowledge about how organizations like this usually work, and \
+never use the {GENERAL} marker to smuggle one through. If it is not in the \
+documents, hand off.
+
+The test: would a wrong answer here be wrong *for Bald Ridge specifically*? \
+Then it needs a source. Would it be wrong *anywhere*? Then it is general \
+knowledge and you may answer it.
+
 # When to hand off instead
 Reply with exactly this and nothing else — no apology, no preamble:
 {NO_ANSWER}
 
 Use it only when one of these is true:
-- Nothing in the SOURCES bears on the question at all, even indirectly.
+- The question is about the organization specifically and nothing in the SOURCES bears \
+on it.
 - Answering would mean inventing a specific value or a policy that is not there.
 - The question is about a named resident, client, youth, employee, or family, or \
 asks for personal, medical, or case details about an individual.
@@ -137,6 +170,7 @@ the provided documents".
 class AnswerResult:
     text: str = ""
     escalated: bool = False
+    general: bool = False   # answered from world knowledge, not the documents
     escalation_reason: str = ""
     citations: list[dict] = field(default_factory=list)
     input_tokens: int = 0
@@ -266,6 +300,14 @@ def stream_answer(
 
             buffer += delta
             stripped = buffer.lstrip()
+            if GENERAL in stripped:
+                # Swallow the marker, then stream normally from here.
+                sentinel_settled = True
+                rest = buffer.replace(GENERAL, "", 1).lstrip()
+                buffer = ""
+                if rest:
+                    yield ("delta", rest)
+                continue
             if NO_ANSWER in stripped:
                 result.escalated = True
                 result.escalation_reason = "model_declined"
@@ -297,12 +339,19 @@ def stream_answer(
             result.escalated = True
             result.escalation_reason = "model_declined"
         else:
+            if GENERAL in raw:
+                # Explicitly flagged as world knowledge. It has nothing to cite
+                # by definition, so the citation rule below does not apply —
+                # the UI labels it instead, so the reader knows it is not policy.
+                result.general = True
+                raw = raw.replace(GENERAL, "").strip()
             cleaned, citations = validate_citations(raw, hits)
             result.text = cleaned
             result.citations = citations
-            if not citations:
-                # Grounded answers cite. An uncited one is unverifiable, so we
-                # decline rather than pass along something nobody can check.
+            if not citations and not result.general:
+                # An answer claiming to be about this organization but citing
+                # nothing is unverifiable, so we decline rather than pass along
+                # something nobody can check.
                 result.escalated = True
                 result.escalation_reason = "no_citations"
                 result.text = ""

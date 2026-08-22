@@ -71,10 +71,18 @@ class FirestoreRepo:
         return _from_dict(UserRecord, snap.to_dict()) if snap.exists else None
 
     def get_user_by_email(self, email: str) -> UserRecord | None:
-        key = self._col("user_emails").document(email.lower()).get()
-        if not key.exists:
-            return None
-        return self.get_user((key.to_dict() or {}).get("user_id", ""))
+        # Straight query on the indexed email field: one round trip. Going via
+        # user_emails/{email} then users/{id} was two sequential trips, and this
+        # sits on the login path where that latency is felt directly. The
+        # user_emails doc still exists — it is what enforces uniqueness on
+        # create — it just isn't needed to read.
+        docs = list(
+            self._col("users")
+            .where(filter=firestore.FieldFilter("email", "==", email.lower()))
+            .limit(1)
+            .stream()
+        )
+        return _from_dict(UserRecord, docs[0].to_dict()) if docs else None
 
     def list_users(self) -> list[UserRecord]:
         users = [_from_dict(UserRecord, d.to_dict()) for d in self._col("users").stream()]

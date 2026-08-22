@@ -1,3 +1,4 @@
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -15,8 +16,16 @@ async def lifespan(app: FastAPI):
     store = get_repo()
     store.bootstrap()
     print(f"[startup] store: {type(store).__name__}")
-    count = index.rebuild(store)
-    print(f"[startup] retrieval index ready — {count} chunks")
+
+    # Built off the request path. Signing in and loading the UI need nothing
+    # from the index, so blocking startup on it just made every cold start's
+    # first login wait for the whole corpus. Anything that does need it calls
+    # index.wait_ready() and blocks only itself.
+    def _warm():
+        count = index.rebuild(store)
+        print(f"[startup] retrieval index ready — {count} chunks")
+
+    threading.Thread(target=_warm, name="index-warm", daemon=True).start()
     if not settings.anthropic_api_key:
         print("[startup] WARNING: ANTHROPIC_API_KEY is not set; /chat/ask will fail")
     if not (settings.org_phone or settings.org_email):

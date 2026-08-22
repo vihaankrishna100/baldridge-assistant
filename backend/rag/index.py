@@ -247,6 +247,11 @@ class HybridIndex:
         self._svd: TruncatedSVD | None = None
         self._dense = None
         self.ready = False
+        # Set once the first build finishes. Lets the app answer auth requests
+        # immediately on a cold start while the index warms in the background —
+        # signing in does not need the corpus, and rebuilding 645 chunks in
+        # front of it added many seconds to the first login of the day.
+        self._first_build = threading.Event()
 
     # ------------------------------------------------------------ build
 
@@ -284,6 +289,7 @@ class HybridIndex:
                 self._svd = None
                 self._dense = None
                 self.ready = True
+                self._first_build.set()
                 return 0
 
             self._bm25 = BM25([e.tokens for e in entries])
@@ -319,6 +325,7 @@ class HybridIndex:
                 self._dense = None
 
             self.ready = True
+            self._first_build.set()
             return len(entries)
 
     # ------------------------------------------------------------ search
@@ -416,6 +423,10 @@ class HybridIndex:
             for rank, idx in enumerate(order, start=1)
             if np.isfinite(scores[idx]) and scores[idx] > 0
         }
+
+    def wait_ready(self, timeout: float = 60.0) -> bool:
+        """Blocks until the first build completes. Only retrieval needs this."""
+        return self._first_build.wait(timeout)
 
     def stats(self) -> dict:
         with self._lock:
