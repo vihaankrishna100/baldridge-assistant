@@ -27,6 +27,7 @@ from security import (
     decode_token,
     hash_invite_token,
     hash_password,
+    needs_rehash,
     new_totp_secret,
     password_problems,
     totp_uri,
@@ -74,11 +75,19 @@ def login(payload: LoginRequest, request: Request):
         audit.log("login_failed", user=user, detail="bad password", request=request)
         raise HTTPException(status_code=401, detail=BAD_CREDENTIALS)
 
-    # Only write when there is something to clear. A successful login on a
+    # Only write when there is something to change. A successful login on a
     # clean account previously cost a Firestore write for no reason.
+    dirty = False
     if user.failed_logins or user.locked_until:
         user.failed_logins = 0
         user.locked_until = None
+        dirty = True
+    if needs_rehash(user.password_hash):
+        # The plaintext is only available here, so this is the one moment the
+        # stored hash can be re-costed without asking anyone to reset.
+        user.password_hash = hash_password(payload.password)
+        dirty = True
+    if dirty:
         store.save_user(user)
 
     # An allowlisted account signs in on password alone. Everyone else goes

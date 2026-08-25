@@ -1,4 +1,6 @@
 import threading
+
+import audit
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -34,6 +36,9 @@ async def lifespan(app: FastAPI):
             "message will tell staff to ask a supervisor instead of giving a number"
         )
     yield
+
+    # Drain queued audit writes before the container goes away.
+    audit.flush()
 
 
 app = FastAPI(

@@ -85,7 +85,7 @@ def _log(action: str, user_id: str, user_email: str, ip: str, detail: str = "", 
     The request-scoped `user` object isn't carried into the stream, so the few
     identity fields it needs are passed as plain strings.
     """
-    get_repo().append_audit(
+    audit.submit(
         AuditEntry(
             user_id=user_id, user_email=user_email, action=action,
             target=target[:300], detail=detail[:2000], ip=ip,
