@@ -106,7 +106,11 @@ class CitationOut(BaseModel):
 
 
 class AuditOut(BaseModel):
-    id: int
+    # str, not int. The original SQLAlchemy model used an autoincrement
+    # integer; every repo entity now carries a uuid string, and Firestore has
+    # no autoincrement at all. Typing this int made /admin/audit 500 against
+    # Firestore while passing against SQLite, whose ids really are integers.
+    id: str
     at: datetime
     user_email: str
     action: str

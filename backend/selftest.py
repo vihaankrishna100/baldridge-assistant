@@ -185,6 +185,27 @@ def main() -> int:
     check("flags a stored password", "API key or password" in scan("password: hunter2hunter2"))
     check("clean text is not flagged", scan("Volunteers sign in at the front desk.") == [])
 
+    print("\nResponse schemas accept uuid ids")
+    # The sqlite backend hands out integer audit ids and Firestore hands out
+    # uuid strings, so a schema typed for one silently 500s on the other. This
+    # exercises the uuid shape, which is what production actually stores.
+    from repo.base import AuditEntry, DocumentRecord, InviteRecord, UserRecord, new_id
+    from schemas import AuditOut, DocumentOut, UserOut
+
+    ok = True
+    for schema, record in (
+        (AuditOut, AuditEntry(id=new_id(), user_email="a@b.c", action="login_success")),
+        (UserOut, UserRecord(id=new_id(), email="a@b.c")),
+        (DocumentOut, DocumentRecord(id=new_id(), title="t")),
+    ):
+        try:
+            schema.model_validate(record)
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            check(f"{schema.__name__} accepts a uuid id", False, str(exc)[:90])
+    if ok:
+        check("every response schema accepts a uuid id", True)
+
     print("\nEscalation copy")
     check(
         "never invents a phone number when unconfigured",
