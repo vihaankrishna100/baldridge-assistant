@@ -14,6 +14,7 @@ from rag import redact
 from rag.chunker import chunk_pages
 from rag.extract import ExtractionError, extract
 from rag.index import index
+from repo import get_repo
 from repo.base import ChunkRecord, DocumentRecord, UserRecord, utcnow
 from schemas import DocumentOut, DocumentUpdate
 
@@ -50,6 +51,21 @@ def list_documents(
         if d.visibility in tiers
     ]
     return [DocumentOut.model_validate(d) for d in docs]
+
+
+@router.get("/storage")
+def storage(_: UserRecord = Depends(require_leadership)):
+    """How full the database is, for whoever uploads documents. None when the
+    store cannot measure itself (SQLite, Firestore)."""
+    store = get_repo()
+    if not hasattr(store, "storage_bytes"):
+        return None
+    return {
+        "used_bytes": store.storage_bytes(),
+        "limit_bytes": settings.storage_limit_mb * 1024 * 1024,
+        "breakdown": store.storage_breakdown(),
+        "files_in_github": isinstance(get_docstore(), GitHubDocStore),
+    }
 
 
 @router.post("", response_model=DocumentOut, status_code=201)

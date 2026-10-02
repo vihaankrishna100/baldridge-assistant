@@ -206,6 +206,7 @@ def stats(_: UserRecord = Depends(require_admin)):
             {
                 "used_bytes": store.storage_bytes(),
                 "limit_bytes": settings.storage_limit_mb * 1024 * 1024,
+                "breakdown": store.storage_breakdown(),
             }
             if hasattr(store, "storage_bytes")
             else None

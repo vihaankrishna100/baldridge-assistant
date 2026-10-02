@@ -355,8 +355,34 @@ class PostgresRepo:
             c.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
 
     def storage_bytes(self) -> int:
+        """The whole database: every table, index and system catalog."""
         with get_pool().connection() as c:
             return c.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"]
+
+    _STORAGE_GROUPS = {
+        "documents": ("documents", "document_blobs", "chunks"),
+        "users": ("users", "invites", "query_counters"),
+        "chat history": ("conversations", "messages"),
+        "audit log": ("audit",),
+    }
+
+    def storage_breakdown(self) -> dict[str, int]:
+        """Bytes per area, tables plus their indexes. Whatever the database
+        uses beyond these tables — Postgres's own catalogs, about 8 MB and
+        fixed — is reported as "system" so the parts add up to storage_bytes."""
+        with get_pool().connection() as c:
+            rows = c.execute(
+                """SELECT c.relname AS name, pg_total_relation_size(c.oid) AS n
+                   FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+                   WHERE c.relkind = 'r' AND ns.nspname = current_schema()"""
+            ).fetchall()
+        sizes = {r["name"]: r["n"] for r in rows}
+        out = {
+            group: sum(sizes.pop(t, 0) for t in tables)
+            for group, tables in self._STORAGE_GROUPS.items()
+        }
+        out["system"] = max(0, self.storage_bytes() - sum(out.values()))
+        return out
 
     def chunk_document_ids(self) -> set[str]:
         with get_pool().connection() as c:

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { UploadIcon } from "@/components/Icons";
+import StorageMeter, { type Storage } from "@/components/StorageMeter";
 import { API_BASE, ApiError, api, getToken } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 
@@ -48,6 +49,15 @@ export default function DocumentsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canManage = user?.role === "leadership" || user?.role === "admin";
+  const [storage, setStorage] = useState<Storage | null>(null);
+
+  // Re-read whenever the library changes, so an upload or delete shows up.
+  useEffect(() => {
+    if (!canManage) return;
+    api<Storage | null>("/documents/storage")
+      .then(setStorage)
+      .catch(() => setStorage(null));
+  }, [canManage, docs]);
 
   const load = useCallback(async () => {
     try {
@@ -143,6 +153,12 @@ export default function DocumentsPage() {
           Everything the assistant can answer from. Anything not here, it will refer to a person.
         </p>
       </div>
+
+      {canManage && storage && (
+        <div className="mb-5">
+          <StorageMeter storage={storage} filesInGitHub={Boolean(storage.files_in_github)} />
+        </div>
+      )}
 
       {canManage && (
         <form
