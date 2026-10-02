@@ -1,3 +1,18 @@
+"""SQLAlchemy wiring for the SQLite backend.
+
+The engine is built lazily, and that is load-bearing rather than tidiness.
+`models.py` imports `Base` from here, `deps.py` imports `models`, and every
+route imports `deps` — so importing the application used to construct a
+SQLAlchemy engine from DATABASE_URL before anything had decided which backend
+was in play. With a Postgres DSN that makes SQLAlchemy import psycopg2, which
+this project does not use (psycopg 3 talks to Neon directly, through
+repo/postgres_repo.py) and does not ship. The app would fail at import on the
+first request.
+
+Now nothing connects until something actually asks for a session, which only
+the SQLite repository ever does.
+"""
+
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
@@ -5,17 +20,9 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from config import BASE_DIR, settings
 
-url = settings.database_url
-if url.startswith("sqlite:///./"):
-    db_path = BASE_DIR / url.replace("sqlite:///./", "")
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    url = f"sqlite:///{db_path}"
 
-engine = create_engine(
-    url,
-    connect_args={"check_same_thread": False} if url.startswith("sqlite") else {},
-)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+class Base(DeclarativeBase):
+    """Declarative base. Importing this must not require a database."""
 
 
 class Base(DeclarativeBase):
