@@ -236,3 +236,78 @@ class PostgresRepo:
         with get_pool().connection() as c:
             c.execute("DELETE FROM invites WHERE lower(email) = lower(%s)", (email,))
 
+    # ------------------------------------------------------------ documents
+
+    def get_document(self, document_id: str) -> DocumentRecord | None:
+        with get_pool().connection() as c:
+            return _hydrate(DocumentRecord, c.execute(
+                "SELECT * FROM documents WHERE id = %s", (document_id,)).fetchone())
+
+    def list_documents(self, include_inactive: bool = False) -> list[DocumentRecord]:
+        sql = "SELECT * FROM documents"
+        if not include_inactive:
+            sql += " WHERE is_active"
+        sql += " ORDER BY created_at DESC"
+        with get_pool().connection() as c:
+            return _all(DocumentRecord, c.execute(sql).fetchall())
+
+    def find_active_document_by_checksum(self, checksum: str) -> DocumentRecord | None:
+        with get_pool().connection() as c:
+            return _hydrate(DocumentRecord, c.execute(
+                "SELECT * FROM documents WHERE checksum = %s AND is_active LIMIT 1",
+                (checksum,)).fetchone())
+
+    def create_document(self, doc: DocumentRecord, chunks: list[ChunkRecord]) -> None:
+        with get_pool().connection() as c, c.transaction():
+            c.execute(
+                """INSERT INTO documents (id, title, filename, content_type, category,
+                       visibility, version, is_active, checksum, size_bytes, char_count,
+                       chunk_count, pii_flags, uploaded_by, created_at, updated_at)
+                   VALUES (%(id)s, %(title)s, %(filename)s, %(content_type)s, %(category)s,
+                       %(visibility)s, %(version)s, %(is_active)s, %(checksum)s,
+                       %(size_bytes)s, %(char_count)s, %(chunk_count)s, %(pii_flags)s,
+                       %(uploaded_by)s, %(created_at)s, %(updated_at)s)""",
+                doc.__dict__,
+            )
+            if chunks:
+                # executemany on one statement: 645 chunks is a single round
+                # trip, and the generated tsvector is computed server-side.
+                with c.cursor() as cur:
+                    cur.executemany(
+                        """INSERT INTO chunks (id, document_id, ordinal, heading, page,
+                               text, document_title, category, visibility, document_active)
+                           VALUES (%(id)s, %(document_id)s, %(ordinal)s, %(heading)s,
+                               %(page)s, %(text)s, %(document_title)s, %(category)s,
+                               %(visibility)s, %(document_active)s)""",
+                        [ch.__dict__ for ch in chunks],
+                    )
+
+    def update_document(self, doc: DocumentRecord) -> None:
+        doc.updated_at = utcnow()
+        with get_pool().connection() as c, c.transaction():
+            c.execute(
+                """UPDATE documents SET title=%(title)s, category=%(category)s,
+                       visibility=%(visibility)s, is_active=%(is_active)s,
+                       version=%(version)s, chunk_count=%(chunk_count)s,
+                       pii_flags=%(pii_flags)s, updated_at=%(updated_at)s
+                   WHERE id=%(id)s""",
+                doc.__dict__,
+            )
+            # The denormalised copies on every chunk have to follow, or
+            # retrieval keeps filtering on the old visibility.
+            c.execute(
+                """UPDATE chunks SET document_title=%s, category=%s, visibility=%s,
+                       document_active=%s
+                   WHERE document_id=%s""",
+                (doc.title, doc.category, doc.visibility, doc.is_active, doc.id),
+            )
+
+    def delete_document(self, document_id: str) -> None:
+        # chunks and document_blobs cascade.
+        with get_pool().connection() as c:
+            c.execute("DELETE FROM documents WHERE id = %s", (document_id,))
+
+    def count_active_documents(self) -> int:
+        with get_pool().connection() as c:
+            return c.execute("SELECT count(*) AS n FROM documents WHERE is_active").fetchone()["n"]
+
