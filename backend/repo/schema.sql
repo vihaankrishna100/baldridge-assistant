@@ -121,3 +121,13 @@ CREATE INDEX IF NOT EXISTS chunks_visible_idx ON chunks (visibility) WHERE docum
 CREATE INDEX IF NOT EXISTS chunks_heading_trgm_idx ON chunks USING GIN (heading gin_trgm_ops);
 
 -- ---------------------------------------------------------------- conversations
+CREATE TABLE IF NOT EXISTS conversations (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    title      TEXT NOT NULL DEFAULT 'New question',
+    created_at TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
+    updated_at TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
+);
+
+CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations (user_id, updated_at DESC);
+
