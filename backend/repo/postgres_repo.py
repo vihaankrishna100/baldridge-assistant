@@ -311,3 +311,104 @@ class PostgresRepo:
         with get_pool().connection() as c:
             return c.execute("SELECT count(*) AS n FROM documents WHERE is_active").fetchone()["n"]
 
+    # --------------------------------------------------------------- chunks
+
+    def iter_active_chunks(self) -> list[ChunkRecord]:
+        with get_pool().connection() as c:
+            return _all(ChunkRecord, c.execute(
+                """SELECT id, document_id, ordinal, heading, page, text,
+                          document_title, category, visibility, document_active
+                   FROM chunks WHERE document_active ORDER BY document_id, ordinal"""
+            ).fetchall())
+
+    def count_active_chunks(self) -> int:
+        """Used by the index for its readiness report. A COUNT, rather than
+        pulling 645 rows across the wire just to call len() on them."""
+        with get_pool().connection() as c:
+            return c.execute(
+                "SELECT count(*) AS n FROM chunks WHERE document_active").fetchone()["n"]
+
+    # Two queries, strict then relaxed. websearch_to_tsquery ANDs every term,
+    # which is right when the phrasing matches the document and catastrophic
+    # when it does not: "how many face-to-face contacts a month do we need
+    # with each child" returned nothing, because one word of the eleven was
+    # absent, even though the passage answering it was in the corpus.
+    #
+    # Casting the parsed query to text and swapping & for | relaxes it to OR
+    # while keeping everything websearch_to_tsquery already did correctly —
+    # stemming, stopwords, quoted phrases (<-> survives the swap). Ranking
+    # then does the work BM25 used to: a chunk matching more of the question
+    # scores above one matching less.
+    # Scored by term coverage, not by ts_rank alone.
+    #
+    # ts_rank_cd ranks a chunk highly for matching one common word often,
+    # which is fine under AND semantics and badly wrong under OR: relaxing the
+    # query put an irrelevant "PBP Score Report Dispute Procedure" passage at
+    # 0.91 for a question about incident reports, purely on the word "report".
+    #
+    # coverage is the fraction of the question's own lexemes that appear in
+    # the chunk, so it means something a person can check: 1.0 is "every word
+    # you asked about is in this passage", 0.25 is "one word in four". That is
+    # the number the refusal logic and the citations are better off reading.
+    # ts_rank_cd stays as the tie-break, where density is the right signal.
+    #
+    # The INTERSECT runs per surviving row rather than through the GIN index.
+    # At 645 chunks that is immaterial; past roughly 100k it would need to
+    # become a two-stage query (index-narrowed candidates, then rescored).
+    _SEARCH_SQL = """
+        WITH q AS (
+            SELECT {query_expr} AS tsq,
+                   tsvector_to_array(to_tsvector('english', %(q)s)) AS terms
+        )
+        SELECT c.id, c.document_id, c.ordinal, c.heading, c.page, c.text,
+               c.document_title, c.category, c.visibility, c.document_active,
+               CASE WHEN cardinality(q.terms) = 0 THEN 0::float8
+                    ELSE cardinality(ARRAY(
+                             SELECT unnest(tsvector_to_array(c.search_vector))
+                             INTERSECT
+                             SELECT unnest(q.terms)
+                         ))::float8 / cardinality(q.terms)
+               END AS score,
+               ts_rank_cd(c.search_vector, q.tsq, 32) AS density
+        FROM chunks c, q
+        WHERE c.document_active
+          AND c.visibility = ANY(%(vis)s)
+          AND c.search_vector @@ q.tsq
+        ORDER BY score DESC, density DESC
+        LIMIT %(lim)s
+    """
+
+    _STRICT = "websearch_to_tsquery('english', %(q)s)"
+    _RELAXED = "replace(websearch_to_tsquery('english', %(q)s)::text, '&', '|')::tsquery"
+
+    def search_chunks(
+        self, query: str, visibilities: list[str], limit: int = 8
+    ) -> list[tuple[ChunkRecord, float]]:
+        """Full-text retrieval, ranked, filtered by visibility.
+
+        Not part of the Repo protocol — it is the Postgres-native replacement
+        for the in-memory BM25 + LSA index, which needed 358 MB of scientific
+        Python and rebuilt itself on every cold start.
+
+        ts_rank_cd with normalisation 32 divides by (rank + 1), bounding the
+        score into [0, 1). The previous fused BM25/LSA score was unbounded and
+        uncalibrated — an off-corpus question once outscored a real one.
+        """
+        if not visibilities or not query.strip():
+            return []
+        params = {"q": query, "vis": list(visibilities), "lim": limit}
+        with get_pool().connection() as c:
+            rows = c.execute(
+                self._SEARCH_SQL.format(query_expr=self._STRICT), params).fetchall()
+            if not rows:
+                rows = c.execute(
+                    self._SEARCH_SQL.format(query_expr=self._RELAXED), params).fetchall()
+        out: list[tuple[ChunkRecord, float]] = []
+        for row in rows:
+            score = float(row.pop("score") or 0.0)
+            row.pop("density", None)
+            chunk = _hydrate(ChunkRecord, row)
+            if chunk is not None:
+                out.append((chunk, score))
+        return out
+
