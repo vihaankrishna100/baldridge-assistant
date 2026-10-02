@@ -92,3 +92,32 @@ CREATE TABLE IF NOT EXISTS document_blobs (
 -- copies. They were denormalised for Firestore, and they stay that way here so
 -- retrieval is one indexed table scan with no join. update_document rewrites
 -- them whenever the parent changes.
+CREATE TABLE IF NOT EXISTS chunks (
+    id              TEXT PRIMARY KEY,
+    document_id     TEXT NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+    ordinal         INTEGER NOT NULL DEFAULT 0,
+    heading         TEXT NOT NULL DEFAULT '',
+    page            INTEGER,
+    text            TEXT NOT NULL DEFAULT '',
+    document_title  TEXT NOT NULL DEFAULT '',
+    category        TEXT NOT NULL DEFAULT 'General',
+    visibility      TEXT NOT NULL DEFAULT 'staff',
+    document_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    -- The retrieval index itself. Heading is weighted B and body A: a heading
+    -- match is a useful signal but a body match is what actually answers the
+    -- question. Stored, so it is computed on write, not per query.
+    search_vector   TSVECTOR GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', coalesce(heading, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(text, '')), 'A')
+    ) STORED
+);
+
+CREATE INDEX IF NOT EXISTS chunks_search_idx ON chunks USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS chunks_document_idx ON chunks (document_id, ordinal);
+-- Visibility is part of every search's WHERE clause, so it is worth its own index.
+CREATE INDEX IF NOT EXISTS chunks_visible_idx ON chunks (visibility) WHERE document_active;
+-- Trigram index over headings, for matching a section the user half-remembers.
+CREATE INDEX IF NOT EXISTS chunks_heading_trgm_idx ON chunks USING GIN (heading gin_trgm_ops);
+
+-- ---------------------------------------------------------------- conversations
