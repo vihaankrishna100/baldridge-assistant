@@ -82,18 +82,12 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Could not find any readable text in that file.")
 
     version = 1
+    previous = None
     if replaces:
         previous = store.get_document(replaces)
         if previous is None:
             raise HTTPException(status_code=404, detail="The document being replaced no longer exists.")
-        previous.is_active = False
-        previous.updated_at = utcnow()
-        store.update_document(previous)
         version = previous.version + 1
-        audit.log(
-            "document_superseded", user=user, target=previous.title,
-            detail=f"replaced by v{version}", request=request,
-        )
 
     doc = DocumentRecord(
         title=(title.strip() or (file.filename or "Untitled")),
@@ -125,9 +119,25 @@ async def upload_document(
         for p in proto_chunks
     ]
 
-    # Original kept so leadership can download exactly what was approved.
-    get_blobs().put(doc.id, data)
+    # Record before bytes: Postgres keys document_blobs to documents(id).
     store.create_document(doc, chunks)
+    try:
+        # Original kept so leadership can download exactly what was approved.
+        get_blobs().put(doc.id, data)
+    except Exception:
+        store.delete_document(doc.id)
+        raise
+
+    # Retired only once the new version is fully stored, so a failed upload
+    # never leaves the policy missing from search.
+    if previous is not None:
+        previous.is_active = False
+        previous.updated_at = utcnow()
+        store.update_document(previous)
+        audit.log(
+            "document_superseded", user=user, target=previous.title,
+            detail=f"replaced by v{version}", request=request,
+        )
     index.rebuild()
 
     audit.log(
