@@ -29,11 +29,17 @@ async def lifespan(app: FastAPI):
     # from the index, so blocking startup on it just made every cold start's
     # first login wait for the whole corpus. Anything that does need it calls
     # index.wait_ready() and blocks only itself.
-    def _warm():
-        count = index.rebuild(store)
-        print(f"[startup] retrieval index ready — {count} chunks")
+    if hasattr(store, "search_chunks"):
+        # Postgres keeps the index in the database, so "warming" is two COUNT
+        # queries. Doing it inline avoids a thread per cold start and removes
+        # the window where a question arrives before the index reports ready.
+        print(f"[startup] retrieval: postgres — {index.rebuild(store)} chunks")
+    else:
+        def _warm():
+            count = index.rebuild(store)
+            print(f"[startup] retrieval index ready — {count} chunks")
 
-    threading.Thread(target=_warm, name="index-warm", daemon=True).start()
+        threading.Thread(target=_warm, name="index-warm", daemon=True).start()
     if not settings.anthropic_api_key:
         print("[startup] WARNING: ANTHROPIC_API_KEY is not set; /chat/ask will fail")
     if not (settings.org_phone or settings.org_email):
