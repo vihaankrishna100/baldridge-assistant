@@ -382,6 +382,28 @@ class HybridIndex:
         top_k = top_k or settings.retrieval_top_k
         candidates = candidates or settings.retrieval_candidates
 
+        delegate = _delegating_store()
+        if delegate is not None:
+            rows = delegate.search_chunks(query, allowed_visibility, limit=top_k)
+            return [
+                Hit(
+                    chunk_id=c.id,
+                    document_id=c.document_id,
+                    document_title=c.document_title,
+                    category=c.category,
+                    visibility=c.visibility,
+                    heading=c.heading,
+                    page=c.page,
+                    text=c.text,
+                    # ts_rank_cd with normalisation 32 is already bounded into
+                    # [0, 1), so it serves as both the confidence and the
+                    # ordering score. No fusion, nothing to calibrate.
+                    score=score,
+                    rank_score=score,
+                )
+                for c, score in rows
+            ]
+
         with self._lock:
             if not self._entries or self._bm25 is None or self._vectorizer is None:
                 return []
@@ -472,6 +494,14 @@ class HybridIndex:
 
     def stats(self) -> dict:
         with self._lock:
+            if self._pg_chunks:
+                return {
+                    "ready": self.ready,
+                    "chunks": self._pg_chunks,
+                    "documents": self._pg_documents,
+                    "semantic_enabled": False,
+                    "engine": "postgres",
+                }
             return {
                 "ready": self.ready,
                 "chunks": len(self._entries),
