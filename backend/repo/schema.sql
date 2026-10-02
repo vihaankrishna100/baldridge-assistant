@@ -56,3 +56,29 @@ CREATE INDEX IF NOT EXISTS invites_email_idx ON invites (lower(email));
 CREATE INDEX IF NOT EXISTS invites_open_idx ON invites (expires_at) WHERE accepted_at IS NULL;
 
 -- ---------------------------------------------------------------- documents
+CREATE TABLE IF NOT EXISTS documents (
+    id           TEXT PRIMARY KEY,
+    title        TEXT NOT NULL DEFAULT '',
+    filename     TEXT NOT NULL DEFAULT '',
+    content_type TEXT NOT NULL DEFAULT '',
+    category     TEXT NOT NULL DEFAULT 'General',
+    visibility   TEXT NOT NULL DEFAULT 'staff',
+    version      INTEGER NOT NULL DEFAULT 1,
+    is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+    checksum     TEXT NOT NULL DEFAULT '',
+    size_bytes   BIGINT NOT NULL DEFAULT 0,
+    char_count   BIGINT NOT NULL DEFAULT 0,
+    chunk_count  INTEGER NOT NULL DEFAULT 0,
+    pii_flags    TEXT NOT NULL DEFAULT '',
+    uploaded_by  TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
+    updated_at   TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
+);
+
+-- find_active_document_by_checksum is the duplicate-upload guard.
+CREATE INDEX IF NOT EXISTS documents_checksum_idx ON documents (checksum) WHERE is_active;
+CREATE INDEX IF NOT EXISTS documents_active_idx ON documents (is_active, created_at DESC);
+
+-- Original bytes, kept out of `documents` so listing never drags them over the
+-- wire. This replaces the Cloud Storage bucket; Neon's free tier is 0.5 GB and
+-- the whole current library is a single 3 MB PDF.
