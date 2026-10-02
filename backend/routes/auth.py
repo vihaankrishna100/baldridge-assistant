@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 from datetime import datetime, timedelta, timezone
 
@@ -37,46 +38,82 @@ from security import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Wrong passwords lock out the address they came from, not the account: on a
+# shared login, one person's typos must not sign out everyone everywhere.
+# Failures are counted in 5-minute buckets over the last 15 minutes.
 LOCKOUT_THRESHOLD = 5
-LOCKOUT_MINUTES = 15
+# Backstop for guessing spread across many addresses, which a per-address
+# limit alone would never stop. Far above anything typos produce.
+ACCOUNT_LOCKOUT_THRESHOLD = 50
+_BUCKET_MINUTES = 5
+_WINDOW_BUCKETS = 3
 
 # Returned for both "no such user" and "wrong password" so the endpoint can't
 # be used to enumerate who works here.
 BAD_CREDENTIALS = "Email or password is incorrect."
+LOCKED = "Too many failed attempts from this device. Try again in about 15 minutes."
+
+
+def _buckets() -> list[str]:
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    start = now.replace(minute=now.minute - now.minute % _BUCKET_MINUTES)
+    return [
+        (start - timedelta(minutes=_BUCKET_MINUTES * i)).strftime("%Y-%m-%dT%H:%M")
+        for i in range(_WINDOW_BUCKETS)
+    ]
+
+
+def _failure_keys(user: UserRecord, ip: str) -> tuple[str, str]:
+    # Stored in query_counters, whose key column is 32 characters.
+    per_ip = "lf:" + hashlib.sha256(f"{user.id}|{ip}".encode()).hexdigest()[:29]
+    per_account = "la:" + user.id[:29]
+    return per_ip, per_account
+
+
+def _is_locked(user: UserRecord, ip: str) -> bool:
+    store = get_repo()
+    per_ip, per_account = _failure_keys(user, ip)
+    buckets = _buckets()
+    ip_failures = sum(store.get_query_counter(per_ip, b) for b in buckets)
+    if ip_failures >= LOCKOUT_THRESHOLD:
+        return True
+    return sum(store.get_query_counter(per_account, b) for b in buckets) >= ACCOUNT_LOCKOUT_THRESHOLD
+
+
+def _record_failure(user: UserRecord, ip: str) -> None:
+    store = get_repo()
+    bucket = _buckets()[0]
+    for key in _failure_keys(user, ip):
+        store.bump_query_counter(key, bucket, 10**9)
 
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, request: Request):
     store = get_repo()
     user = store.get_user_by_email(payload.email)
-    now = utcnow()
+    ip = audit.client_ip(request)
 
     if user is None:
         audit.log("login_failed", target=payload.email, detail="unknown account", request=request)
         raise HTTPException(status_code=401, detail=BAD_CREDENTIALS)
 
-    if user.locked_until and user.locked_until > now:
-        raise HTTPException(
-            status_code=423,
-            detail="Too many failed attempts. This account is locked for a few minutes.",
-        )
+    if _is_locked(user, ip):
+        raise HTTPException(status_code=423, detail=LOCKED)
 
     if not user.is_active:
         audit.log("login_failed", user=user, detail="account disabled", request=request)
         raise HTTPException(status_code=403, detail="This account has been disabled.")
 
     if not verify_password(payload.password, user.password_hash):
-        user.failed_logins += 1
-        if user.failed_logins >= LOCKOUT_THRESHOLD:
-            user.locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
-            user.failed_logins = 0
-            audit.log("account_locked", user=user, request=request)
-        store.save_user(user)
+        _record_failure(user, ip)
         audit.log("login_failed", user=user, detail="bad password", request=request)
+        if _is_locked(user, ip):
+            audit.log("login_locked", user=user, detail=f"ip {ip}", request=request)
         raise HTTPException(status_code=401, detail=BAD_CREDENTIALS)
 
     # Only write when there is something to change. A successful login on a
-    # clean account previously cost a Firestore write for no reason.
+    # clean account previously cost a Firestore write for no reason. The
+    # fields cleared here belong to the old account-wide lockout.
     dirty = False
     if user.failed_logins or user.locked_until:
         user.failed_logins = 0

@@ -351,6 +351,10 @@ class FirestoreRepo:
 
         return _bump(self._db.transaction())
 
+    def get_query_counter(self, user_id: str, hour_bucket: str) -> int:
+        snap = self._col("counters").document(f"{user_id}:{hour_bucket}").get()
+        return (snap.to_dict() or {}).get("count", 0) if snap.exists else 0
+
     # ------------------------------------------------------------ lifecycle
 
     def bootstrap(self) -> None:

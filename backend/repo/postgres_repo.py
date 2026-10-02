@@ -614,6 +614,13 @@ class PostgresRepo:
                 (user_id, hour_bucket, limit)).fetchone()
         return row is not None
 
+    def get_query_counter(self, user_id: str, hour_bucket: str) -> int:
+        with get_pool().connection() as c:
+            row = c.execute(
+                "SELECT count FROM query_counters WHERE user_id = %s AND hour_bucket = %s",
+                (user_id, hour_bucket)).fetchone()
+        return row["count"] if row else 0
+
     # ------------------------------------------------------------ lifecycle
 
     def bootstrap(self) -> None:

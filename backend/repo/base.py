@@ -208,6 +208,10 @@ class Repo(Protocol):
         """Increments the bucket. Returns False when the caller is over `limit`."""
         ...
 
+    def get_query_counter(self, user_id: str, hour_bucket: str) -> int:
+        """Reads a bucket without changing it."""
+        ...
+
     # ------------------------------------------------------------- lifecycle
     def bootstrap(self) -> None:
         """Create tables / warm clients. Safe to call repeatedly."""

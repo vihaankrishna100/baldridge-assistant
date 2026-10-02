@@ -384,6 +384,13 @@ class SqliteRepo:
             s.commit()
             return True
 
+    def get_query_counter(self, user_id: str, hour_bucket: str) -> int:
+        with SessionLocal() as s:
+            row = (s.query(m.QueryCounter)
+                   .filter(m.QueryCounter.user_id == user_id,
+                           m.QueryCounter.hour_bucket == hour_bucket).one_or_none())
+            return row.count if row else 0
+
     # ------------------------------------------------------------ lifecycle
 
     def bootstrap(self) -> None:
