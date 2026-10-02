@@ -412,3 +412,56 @@ class PostgresRepo:
                 out.append((chunk, score))
         return out
 
+    # -------------------------------------------------------- conversations
+
+    def get_conversation(self, conversation_id: str) -> ConversationRecord | None:
+        with get_pool().connection() as c:
+            return _hydrate(ConversationRecord, c.execute(
+                "SELECT * FROM conversations WHERE id = %s", (conversation_id,)).fetchone())
+
+    def list_conversations(self, user_id: str, limit: int = 50) -> list[ConversationRecord]:
+        with get_pool().connection() as c:
+            return _all(ConversationRecord, c.execute(
+                """SELECT * FROM conversations WHERE user_id = %s
+                   ORDER BY updated_at DESC LIMIT %s""",
+                (user_id, limit)).fetchall())
+
+    def create_conversation(self, conversation: ConversationRecord) -> ConversationRecord:
+        with get_pool().connection() as c:
+            c.execute(
+                """INSERT INTO conversations (id, user_id, title, created_at, updated_at)
+                   VALUES (%(id)s, %(user_id)s, %(title)s, %(created_at)s, %(updated_at)s)""",
+                conversation.__dict__,
+            )
+        return conversation
+
+    def save_conversation(self, conversation: ConversationRecord) -> None:
+        with get_pool().connection() as c:
+            c.execute(
+                "UPDATE conversations SET title=%(title)s, updated_at=%(updated_at)s WHERE id=%(id)s",
+                conversation.__dict__,
+            )
+
+    def delete_conversation(self, conversation_id: str) -> None:
+        with get_pool().connection() as c:
+            c.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
+
+    def list_messages(self, conversation_id: str) -> list[MessageRecord]:
+        with get_pool().connection() as c:
+            return _all(MessageRecord, c.execute(
+                "SELECT * FROM messages WHERE conversation_id = %s ORDER BY created_at",
+                (conversation_id,)).fetchall())
+
+    def add_message(self, message: MessageRecord) -> MessageRecord:
+        with get_pool().connection() as c:
+            c.execute(
+                """INSERT INTO messages (id, conversation_id, role, content, answered,
+                       escalated, escalation_reason, citations_json, top_score,
+                       input_tokens, output_tokens, created_at)
+                   VALUES (%(id)s, %(conversation_id)s, %(role)s, %(content)s, %(answered)s,
+                       %(escalated)s, %(escalation_reason)s, %(citations_json)s,
+                       %(top_score)s, %(input_tokens)s, %(output_tokens)s, %(created_at)s)""",
+                message.__dict__,
+            )
+        return message
+
