@@ -1,0 +1,38 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # Two installs on purpose. The first proves requirements.txt alone is
+      # enough to import the app the way Vercel will; the second adds the
+      # development-only scientific stack so the offline suite can exercise
+      # the SQLite retrieval path.
+      - name: Install production dependencies
+        run: pip install -r requirements.txt
+
+      - name: Production import profile (what Vercel will do)
+        run: python check_serverless_imports.py
+
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Offline suite (retrieval, guardrails, schemas)
+        run: python selftest.py
