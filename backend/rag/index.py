@@ -6,10 +6,21 @@ import threading
 from collections import Counter
 from dataclasses import dataclass
 
-import numpy as np
-from sklearn.decomposition import TruncatedSVD
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import normalize
+# scikit-learn, scipy and numpy total 358 MB, which does not fit Vercel's
+# 250 MB function limit. They are only needed by the in-memory index, which
+# only the SQLite backend uses; Postgres does its retrieval in the database.
+# Importing them optionally is what lets one codebase serve both.
+try:
+    import numpy as np
+    from sklearn.decomposition import TruncatedSVD
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.preprocessing import normalize
+
+    SCIENTIFIC_STACK = True
+except ModuleNotFoundError:  # pragma: no cover - the serverless deployment
+    np = None  # type: ignore[assignment]
+    TruncatedSVD = TfidfVectorizer = normalize = None  # type: ignore[assignment]
+    SCIENTIFIC_STACK = False
 
 from config import settings
 
@@ -163,6 +174,21 @@ def analyze(text: str) -> list[str]:
     """
     tokens = tokenize(text)
     return tokens + [f"{a}_{b}" for a, b in zip(tokens, tokens[1:])]
+
+
+def _delegating_store(store=None):
+    """The active store, if it can do retrieval itself.
+
+    Postgres ranks with a GIN index over a generated tsvector, so there is no
+    in-memory structure to build and nothing to keep warm — which is what
+    makes a stateless function viable. SQLite cannot, so it falls through to
+    the BM25 + LSA index below.
+    """
+    if store is None:
+        from repo import get_repo
+
+        store = get_repo()
+    return store if hasattr(store, "search_chunks") else None
 
 
 @dataclass
