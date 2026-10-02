@@ -487,3 +487,34 @@ class PostgresRepo:
         with get_pool().connection() as c:
             return _all(AuditEntry, c.execute(sql, params).fetchall())
 
+    # ----------------------------------------------------------- statistics
+
+    def count_messages_since(self, since: datetime, escalated: bool) -> int:
+        with get_pool().connection() as c:
+            return c.execute(
+                """SELECT count(*) AS n FROM messages
+                   WHERE created_at >= %s AND escalated = %s AND role = 'assistant'""",
+                (since, escalated)).fetchone()["n"]
+
+    def coverage_gaps(self, since: datetime, limit: int = 15) -> list[tuple[str, int]]:
+        """What staff keep asking that the library does not answer.
+
+        One GROUP BY, where Firestore needed a full scan and a Python tally.
+        The excluded reasons are the ones that say nothing about coverage: a
+        blocked meta-query, a crash, or a safety refusal is not a gap in the
+        documents.
+        """
+        with get_pool().connection() as c:
+            rows = c.execute(
+                """SELECT target, count(*) AS n FROM audit
+                   WHERE action = 'question_escalated'
+                     AND at >= %s
+                     AND target <> ''
+                     AND detail NOT LIKE '%%meta_query%%'
+                     AND detail NOT LIKE '%%error%%'
+                     AND detail NOT LIKE '%%safety_refusal%%'
+                     AND detail NOT LIKE '%%out_of_scope%%'
+                   GROUP BY target ORDER BY n DESC LIMIT %s""",
+                (since, limit)).fetchall()
+        return [(r["target"], r["n"]) for r in rows]
+
