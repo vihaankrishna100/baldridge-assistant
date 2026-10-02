@@ -82,3 +82,13 @@ CREATE INDEX IF NOT EXISTS documents_active_idx ON documents (is_active, created
 -- Original bytes, kept out of `documents` so listing never drags them over the
 -- wire. This replaces the Cloud Storage bucket; Neon's free tier is 0.5 GB and
 -- the whole current library is a single 3 MB PDF.
+CREATE TABLE IF NOT EXISTS document_blobs (
+    document_id TEXT PRIMARY KEY REFERENCES documents (id) ON DELETE CASCADE,
+    content     BYTEA NOT NULL
+);
+
+-- ---------------------------------------------------------------- chunks
+-- document_title / category / visibility / document_active are denormalised
+-- copies. They were denormalised for Firestore, and they stay that way here so
+-- retrieval is one indexed table scan with no join. update_document rewrites
+-- them whenever the parent changes.
