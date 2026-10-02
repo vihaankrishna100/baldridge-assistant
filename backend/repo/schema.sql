@@ -1,0 +1,16 @@
+-- Postgres schema for the Bald Ridge assistant.
+--
+-- Two things differ from the Firestore layout on purpose:
+--
+--   1. Retrieval lives in the database. The Python index needed scikit-learn,
+--      numpy and scipy — 358 MB, which does not fit Vercel's 250 MB function
+--      cap — and rebuilt itself on every cold start. A GIN index over a
+--      generated tsvector does the same job, statelessly, per request.
+--
+--   2. Email uniqueness is a real constraint. Firestore has none, so the
+--      previous backend kept a companion user_emails/{email} doc inside a
+--      transaction to fake it. Here the database enforces it and the repo
+--      turns 23505 into EmailTaken.
+--
+-- Safe to re-run.
+
