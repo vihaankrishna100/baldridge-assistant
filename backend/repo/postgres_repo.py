@@ -536,3 +536,10 @@ class PostgresRepo:
                 (user_id, hour_bucket, limit)).fetchone()
         return row is not None
 
+    # ------------------------------------------------------------ lifecycle
+
+    def bootstrap(self) -> None:
+        ddl = (Path(__file__).parent / "schema.sql").read_text()
+        with get_pool().connection() as c:
+            c.execute(ddl)
+
