@@ -74,10 +74,17 @@ def password_problems(password: str) -> list[str]:
 # ---------------------------------------------------------------- tokens
 
 
-def create_session_token(user_id: str, epoch: int, scope: str = "session") -> str:
+def create_session_token(
+    user_id: str,
+    epoch: int,
+    scope: str = "session",
+    extra: dict | None = None,
+    ttl_minutes: int | None = None,
+) -> str:
     now = datetime.now(timezone.utc)
-    ttl = settings.session_ttl_minutes if scope == "session" else 5
+    ttl = ttl_minutes or (settings.session_ttl_minutes if scope == "session" else 5)
     payload = {
+        **(extra or {}),
         "sub": user_id,
         "epoch": epoch,
         "scope": scope,
@@ -126,6 +133,30 @@ def verify_totp(secret: str, code: str) -> bool:
         return False
     # valid_window=1 tolerates one 30s step of clock drift in either direction.
     return pyotp.TOTP(secret).verify(cleaned, valid_window=1)
+
+
+def new_email_code() -> tuple[str, dict]:
+    """A 6-digit code and the claims that let the server check it later.
+
+    The challenge token travels through the browser, so it carries an HMAC of
+    the code under the server's key, never the code or a plain hash of it — a
+    bare SHA-256 of six digits is reversed in a millisecond."""
+    code = f"{secrets.randbelow(10**6):06d}"
+    nonce = secrets.token_urlsafe(12)
+    return code, {"m": "email", "n": nonce, "ch": _code_digest(nonce, code)}
+
+
+def check_email_code(claims: dict, code: str) -> bool:
+    cleaned = (code or "").replace(" ", "").strip()
+    if not cleaned.isdigit() or not claims.get("n") or not claims.get("ch"):
+        return False
+    return hmac.compare_digest(_code_digest(claims["n"], cleaned), claims["ch"])
+
+
+def _code_digest(nonce: str, code: str) -> str:
+    return hmac.new(
+        settings.secret_key.encode(), f"{nonce}:{code}".encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def constant_time_equals(a: str, b: str) -> bool:

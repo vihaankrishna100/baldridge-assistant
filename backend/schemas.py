@@ -15,6 +15,21 @@ class LoginResponse(BaseModel):
     challenge_token: str | None = None
     access_token: str | None = None
     user: "UserOut | None" = None
+    method: str | None = None  # "app" | "email", with 2fa_required
+    sent_to: str | None = None  # masked address, for email codes
+
+
+class EnrollRequest(BaseModel):
+    method: str
+
+
+class EnrollConfirmRequest(BaseModel):
+    enroll_token: str
+    code: str
+
+
+class ChallengeRequest(BaseModel):
+    challenge_token: str
 
 
 class TwoFactorRequest(BaseModel):
@@ -45,6 +60,7 @@ class UserOut(BaseModel):
     full_name: str
     role: str
     totp_confirmed: bool
+    twofa_method: str = ""
     is_active: bool
     last_login_at: datetime | None = None
     created_at: datetime

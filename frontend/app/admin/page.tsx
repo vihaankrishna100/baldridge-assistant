@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import StorageMeter, { type Storage } from "@/components/StorageMeter";
+import TwoStepSetup from "@/components/TwoStepSetup";
 import { api } from "@/lib/api";
 import { useRequireAuth, type User } from "@/lib/auth";
 
@@ -66,6 +67,7 @@ export default function AdminPage() {
   const [inviteRole, setInviteRole] = useState("staff");
   const [inviteLink, setInviteLink] = useState("");
   const [error, setError] = useState("");
+  const [twoStepDone, setTwoStepDone] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -110,6 +112,11 @@ export default function AdminPage() {
     return <div className="grid flex-1 place-items-center text-sm text-muted">Loading…</div>;
   }
 
+  // Allowed to skip the code and haven't turned it on themselves.
+  const unprotected = (settings?.twofa_exempt ?? []).filter(
+    (email) => !users.find((u) => u.email.toLowerCase() === email)?.totp_confirmed,
+  );
+
   return (
     <AppShell>
       <div className="mb-6">
@@ -130,22 +137,41 @@ export default function AdminPage() {
         </div>
       )}
 
-      {settings && settings.twofa_exempt.length > 0 && (
+      {twoStepDone && (
+        <p className="mb-6 rounded-2xl border border-mint/40 bg-mint/10 px-4 py-3 text-sm text-mint">
+          Two-step sign-in is on. Next time you sign in, you&apos;ll enter a code after your
+          password.
+        </p>
+      )}
+
+      {unprotected.length > 0 && (
         <div className="mb-6 rounded-2xl border border-amber/40 bg-amber/8 p-4">
           <p className="text-sm font-medium text-amber">
-            {settings.twofa_exempt.length === 1
+            {unprotected.length === 1
               ? "Heads up: this account signs in with just a password"
-              : `Heads up: ${settings.twofa_exempt.length} accounts sign in with just a password`}
+              : `Heads up: ${unprotected.length} accounts sign in with just a password`}
           </p>
           <p className="mt-1 text-sm leading-relaxed text-muted">
-            <span className="text-text">{settings.twofa_exempt.join(", ")}</span> doesn&apos;t
-            need the code from a phone app that other accounts use. That&apos;s convenient, but
-            anyone who learns {settings.twofa_exempt.length === 1 ? "its" : "their"} password
-            could open every document, including leadership-only ones. Keep the password long and
-            don&apos;t share it. When you&apos;re ready for the extra protection, ask whoever set
-            up this assistant to turn on the phone-code step for{" "}
-            {settings.twofa_exempt.length === 1 ? "it" : "them"}.
+            <span className="text-text">{unprotected.join(", ")}</span>{" "}
+            {unprotected.length === 1 ? "doesn't" : "don't"} ask for a sign-in code the way
+            other accounts do. Anyone who learns{" "}
+            {unprotected.length === 1 ? "its" : "their"} password could open every document,
+            including leadership-only ones. Turning on two-step sign-in fixes that: after the
+            password, you also enter a 6-digit code from your phone or email.
           </p>
+          {unprotected.includes(user.email.toLowerCase()) ? (
+            <TwoStepSetup
+              onDone={async () => {
+                setTwoStepDone(true);
+                await load();
+              }}
+            />
+          ) : (
+            <p className="mt-2 text-sm text-muted">
+              Ask {unprotected.length === 1 ? "that person" : "those people"} to sign in and
+              press &ldquo;Set up two-step sign-in&rdquo; on this page.
+            </p>
+          )}
         </div>
       )}
 
@@ -348,7 +374,11 @@ export default function AdminPage() {
                     <p className="text-sm text-text">{u.full_name || u.email}</p>
                     <p className="text-[11px] text-faint">
                       {u.email} · {u.role}
-                      {u.totp_confirmed ? " · 2FA active" : " · 2FA not set up"}
+                      {u.twofa_method === "email"
+                        ? " · sign-in code by email"
+                        : u.totp_confirmed
+                          ? " · sign-in code from app"
+                          : " · no sign-in code yet"}
                       {u.is_active ? "" : " · deactivated"}
                     </p>
                   </div>
@@ -375,7 +405,7 @@ export default function AdminPage() {
                       }}
                       className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-amber"
                     >
-                      Reset 2FA
+                      Reset sign-in code
                     </button>
                     <button
                       onClick={async () => {

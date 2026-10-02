@@ -13,10 +13,14 @@ from config import settings
 from deps import current_user
 from models import ROLE_TEAM, ROLES
 from repo import get_repo
-from repo.base import EmailTaken, InviteRecord, UserRecord, utcnow
+from mailer import MailError, send_sign_in_code
+from repo.base import EMAIL_2FA, EmailTaken, InviteRecord, UserRecord, utcnow
 from schemas import (
     AcceptInviteRequest,
+    ChallengeRequest,
     ChangePasswordRequest,
+    EnrollConfirmRequest,
+    EnrollRequest,
     LoginRequest,
     LoginResponse,
     TotpSetupResponse,
@@ -24,11 +28,13 @@ from schemas import (
     UserOut,
 )
 from security import (
+    check_email_code,
     create_session_token,
     decode_token,
     hash_invite_token,
     hash_password,
     needs_rehash,
+    new_email_code,
     new_totp_secret,
     password_problems,
     totp_uri,
@@ -127,6 +133,11 @@ def login(payload: LoginRequest, request: Request):
     if dirty:
         store.save_user(user)
 
+    # Anyone who has set up a second step uses it — including an allowlisted
+    # account that chose to, which is how an exempt admin turns it on.
+    if user.totp_confirmed:
+        return _second_step(user, request)
+
     # An allowlisted account signs in on password alone. Everyone else goes
     # through the second factor, whether or not they've enrolled yet.
     if settings.is_2fa_exempt(user.email):
@@ -140,15 +151,55 @@ def login(payload: LoginRequest, request: Request):
         return _finalize_login(user, request)
 
     if settings.require_2fa:
-        scope = "2fa" if user.totp_confirmed else "2fa_setup"
-        challenge = create_session_token(user.id, user.token_epoch, scope=scope)
+        challenge = create_session_token(user.id, user.token_epoch, scope="2fa_setup")
         audit.log("login_password_ok", user=user, request=request)
-        return LoginResponse(
-            status="2fa_required" if user.totp_confirmed else "2fa_setup_required",
-            challenge_token=challenge,
-        )
+        return LoginResponse(status="2fa_setup_required", challenge_token=challenge)
 
     return _finalize_login(user, request)
+
+
+def _mask(email: str) -> str:
+    name, _, domain = email.partition("@")
+    return f"{name[:1]}{'•' * max(2, len(name) - 1)}@{domain}"
+
+
+def _send_email_code(user: UserRecord) -> dict:
+    """Emails a fresh code; returns the claims that let us check it."""
+    code, claims = new_email_code()
+    try:
+        send_sign_in_code(user.email, code)
+    except MailError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "We couldn't send the email code just now. Try again in a minute, or ask "
+                "an administrator to reset your two-step sign-in."
+            ),
+        ) from exc
+    return claims
+
+
+def _second_step(user: UserRecord, request: Request) -> LoginResponse:
+    audit.log("login_password_ok", user=user, request=request)
+    if user.twofa_method == "email":
+        claims = _send_email_code(user)
+        token = create_session_token(
+            user.id, user.token_epoch, scope="2fa", extra=claims, ttl_minutes=10
+        )
+        return LoginResponse(
+            status="2fa_required", challenge_token=token, method="email", sent_to=_mask(user.email)
+        )
+    token = create_session_token(user.id, user.token_epoch, scope="2fa")
+    return LoginResponse(status="2fa_required", challenge_token=token, method="app")
+
+
+def _spend_attempt(claims: dict) -> None:
+    """Five tries per code. Without this a 6-digit code falls to guessing."""
+    key = "2a:" + hashlib.sha256((claims.get("n") or claims.get("jti", "")).encode()).hexdigest()[:29]
+    if not get_repo().bump_query_counter(key, "attempts", 5):
+        raise HTTPException(
+            status_code=429, detail="Too many wrong codes. Start over to get a new one."
+        )
 
 
 def _finalize_login(user: UserRecord, request: Request) -> LoginResponse:
@@ -162,14 +213,18 @@ def _finalize_login(user: UserRecord, request: Request) -> LoginResponse:
     )
 
 
-def _user_from_challenge(token: str, expected_scope: str) -> UserRecord:
+def _challenge(token: str, expected_scope: str) -> tuple[UserRecord, dict]:
     payload = decode_token(token)
     if not payload or payload.get("scope") != expected_scope:
         raise HTTPException(status_code=401, detail="This sign-in step expired. Start over.")
     user = get_repo().get_user(payload.get("sub", ""))
     if user is None or not user.is_active or payload.get("epoch") != user.token_epoch:
         raise HTTPException(status_code=401, detail="This sign-in step is no longer valid.")
-    return user
+    return user, payload
+
+
+def _user_from_challenge(token: str, expected_scope: str) -> UserRecord:
+    return _challenge(token, expected_scope)[0]
 
 
 @router.post("/2fa/setup", response_model=TotpSetupResponse)
@@ -189,22 +244,109 @@ def start_2fa_setup(payload: dict):
 
 @router.post("/2fa/confirm", response_model=LoginResponse)
 def confirm_2fa(payload: TwoFactorRequest, request: Request):
-    user = _user_from_challenge(payload.challenge_token, "2fa_setup")
+    user, claims = _challenge(payload.challenge_token, "2fa_setup")
+    _spend_attempt(claims)
     if not verify_totp(user.totp_secret or "", payload.code):
         raise HTTPException(status_code=401, detail="That code didn't match. Try the next one.")
     user.totp_confirmed = True
     get_repo().save_user(user)
-    audit.log("2fa_enrolled", user=user, request=request)
+    audit.log("2fa_enrolled", user=user, detail="app", request=request)
     return _finalize_login(user, request)
 
 
 @router.post("/2fa/verify", response_model=LoginResponse)
 def verify_2fa(payload: TwoFactorRequest, request: Request):
-    user = _user_from_challenge(payload.challenge_token, "2fa")
-    if not verify_totp(user.totp_secret or "", payload.code):
+    user, claims = _challenge(payload.challenge_token, "2fa")
+    _spend_attempt(claims)
+    if claims.get("m") == "email":
+        ok = check_email_code(claims, payload.code)
+    else:
+        ok = verify_totp(user.totp_secret or "", payload.code)
+    if not ok:
         audit.log("2fa_failed", user=user, request=request)
-        raise HTTPException(status_code=401, detail="That code didn't match. Try the next one.")
+        raise HTTPException(status_code=401, detail="That code didn't match. Check it and try again.")
     return _finalize_login(user, request)
+
+
+@router.post("/2fa/resend", response_model=LoginResponse)
+def resend_email_code(payload: ChallengeRequest, request: Request):
+    user, _ = _challenge(payload.challenge_token, "2fa")
+    if user.twofa_method != "email":
+        raise HTTPException(status_code=400, detail="This account uses an authenticator app.")
+    key = "rs:" + user.id[:29]
+    bucket = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    if not get_repo().bump_query_counter(key, bucket, 5):
+        raise HTTPException(status_code=429, detail="Too many codes sent. Try again later.")
+    return _second_step(user, request)
+
+
+# ---------------------------------------------- setting up two-step sign-in
+# For someone already signed in — typically an account that was allowed to
+# skip it and now wants it on. Nothing changes until a code is confirmed, so
+# abandoning halfway leaves the account exactly as it was.
+
+
+@router.get("/2fa/options")
+def two_step_options(user: UserRecord = Depends(current_user)):
+    return {"method": user.twofa_method, "email_available": settings.email_codes_available}
+
+
+@router.post("/2fa/enroll")
+def start_enroll(payload: EnrollRequest, user: UserRecord = Depends(current_user)):
+    if user.role == ROLE_TEAM:
+        raise HTTPException(
+            status_code=403, detail="The shared team login can't have its own second step."
+        )
+    if payload.method == "app":
+        secret = new_totp_secret()
+        uri = totp_uri(secret, user.email)
+        buf = io.BytesIO()
+        qrcode.make(uri, image_factory=qrcode.image.svg.SvgPathImage).save(buf)
+        token = create_session_token(
+            user.id, user.token_epoch, scope="2fa_enroll",
+            extra={"m": "app", "s": secret}, ttl_minutes=10,
+        )
+        return {"enroll_token": token, "secret": secret, "otpauth_uri": uri, "qr_svg": buf.getvalue().decode()}
+    if payload.method == "email":
+        if not settings.email_codes_available:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Email codes aren't switched on for this assistant yet. Use an "
+                    "authenticator app, or ask whoever set it up to connect an email service."
+                ),
+            )
+        claims = _send_email_code(user)
+        token = create_session_token(
+            user.id, user.token_epoch, scope="2fa_enroll", extra=claims, ttl_minutes=10
+        )
+        return {"enroll_token": token, "sent_to": _mask(user.email)}
+    raise HTTPException(status_code=400, detail="Choose an authenticator app or email.")
+
+
+@router.post("/2fa/enroll/confirm")
+def confirm_enroll(
+    payload: EnrollConfirmRequest,
+    request: Request,
+    user: UserRecord = Depends(current_user),
+):
+    enrollee, claims = _challenge(payload.enroll_token, "2fa_enroll")
+    if enrollee.id != user.id:
+        raise HTTPException(status_code=401, detail="This setup step expired. Start over.")
+    _spend_attempt(claims)
+    if claims.get("m") == "app":
+        ok = verify_totp(claims.get("s", ""), payload.code)
+        secret = claims.get("s", "")
+    else:
+        ok = check_email_code(claims, payload.code)
+        secret = EMAIL_2FA
+    if not ok:
+        raise HTTPException(status_code=401, detail="That code didn't match. Check it and try again.")
+    user.totp_secret = secret
+    user.totp_confirmed = True
+    get_repo().save_user(user)
+    audit.log("2fa_enrolled", user=user, detail=user.twofa_method, request=request)
+    return {"ok": True, "method": user.twofa_method}
 
 
 @router.get("/invite/{token}")

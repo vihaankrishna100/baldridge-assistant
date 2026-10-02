@@ -49,6 +49,19 @@ class UserRecord:
     created_at: datetime = field(default_factory=utcnow)
     token_epoch: int = 1
 
+    @property
+    def twofa_method(self) -> str:
+        """"app", "email", or "" when two-step sign-in is not set up."""
+        if not self.totp_confirmed:
+            return ""
+        return "email" if self.totp_secret == EMAIL_2FA else "app"
+
+
+# Stored in totp_secret for someone who gets codes by email. A real TOTP
+# secret is base32, which has no lowercase letters, so this can't collide —
+# and it needs no new column in any of the three stores.
+EMAIL_2FA = "email"
+
 
 @dataclass
 class InviteRecord:

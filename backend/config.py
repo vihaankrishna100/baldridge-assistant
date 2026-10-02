@@ -68,6 +68,19 @@ class Settings(BaseSettings):
     github_docs_dir: str = "documents"
     github_docs_token: str = ""
 
+    # Outgoing email, for sign-in codes sent by email. Any SMTP service works
+    # (Gmail with an app password, Microsoft 365, Resend, Postmark...). Until
+    # SMTP_HOST and SMTP_FROM are set, only authenticator apps are offered.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+
+    @property
+    def email_codes_available(self) -> bool:
+        return bool(self.smtp_host.strip() and self.smtp_from.strip())
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

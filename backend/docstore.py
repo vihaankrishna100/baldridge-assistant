@@ -328,7 +328,9 @@ class GitHubDocStore:
             return [e for e in entries if e.get("id") != doc.id]
 
         self._commit(f"Delete {doc.title}", mutate, deletes=(self.file_path(doc),))
-        self._search_copy().delete_chunks(doc.id)
+        # Passages, plus any copy left in the database from before documents
+        # moved to GitHub (its row and original bytes). A no-op otherwise.
+        self._search_copy().delete_document(doc.id)
 
     # ------------------------------------------------------------ migration
 

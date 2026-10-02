@@ -10,6 +10,7 @@ export type User = {
   full_name: string;
   role: "staff" | "leadership" | "admin" | "team";
   totp_confirmed: boolean;
+  twofa_method?: "" | "app" | "email";
   is_active: boolean;
 };
 

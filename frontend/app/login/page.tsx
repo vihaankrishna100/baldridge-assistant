@@ -13,6 +13,8 @@ type LoginResponse = {
   challenge_token?: string;
   access_token?: string;
   user?: User;
+  method?: "app" | "email";
+  sent_to?: string;
 };
 
 type SetupResponse = { secret: string; otpauth_uri: string; qr_svg: string };
@@ -28,6 +30,8 @@ function LoginForm() {
   const [code, setCode] = useState("");
   const [challenge, setChallenge] = useState("");
   const [setup, setSetup] = useState<SetupResponse | null>(null);
+  const [sentTo, setSentTo] = useState("");
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState(params.get("expired") ? "Your session expired. Please sign in again." : "");
   const [busy, setBusy] = useState(false);
 
@@ -58,6 +62,7 @@ function LoginForm() {
         setSetup(s);
         setStep("enroll");
       } else {
+        setSentTo(res.method === "email" ? (res.sent_to ?? "your email") : "");
         setStep("verify");
       }
     } catch (err) {
@@ -84,6 +89,22 @@ function LoginForm() {
       setCode("");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const resend = async () => {
+    setError("");
+    setNotice("");
+    try {
+      const res = await api<LoginResponse>("/auth/2fa/resend", {
+        method: "POST",
+        body: { challenge_token: challenge },
+      });
+      setChallenge(res.challenge_token ?? "");
+      setCode("");
+      setNotice("A new code is on its way. Use the newest one.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send a new code.");
     }
   };
 
@@ -138,7 +159,7 @@ function LoginForm() {
           {step === "enroll" && setup && (
             <form onSubmit={submitCode} className="space-y-4">
               <div>
-                <h2 className="display text-[21px] text-text">Set up two-factor</h2>
+                <h2 className="display text-[21px] text-text">Set up two-step sign-in</h2>
                 <p className="mt-1 text-sm leading-relaxed text-muted">
                   This assistant can read private documents, so every account needs a second
                   factor. Scan this with Google Authenticator, Authy, or 1Password.
@@ -167,11 +188,23 @@ function LoginForm() {
               <div>
                 <h2 className="display text-[21px] text-text">Verification code</h2>
                 <p className="mt-1 text-sm text-muted">
-                  Enter the 6-digit code from your authenticator app.
+                  {sentTo
+                    ? `We emailed a 6-digit code to ${sentTo}. It expires in 10 minutes.`
+                    : "Enter the 6-digit code from your authenticator app."}
                 </p>
               </div>
               <CodeInput value={code} onChange={setCode} />
               <SubmitButton busy={busy} label="Sign in" />
+              {sentTo && (
+                <button
+                  type="button"
+                  onClick={() => void resend()}
+                  className="w-full text-center text-xs text-muted hover:text-cyan"
+                >
+                  Didn&apos;t get it? Send a new code
+                </button>
+              )}
+              {notice && <p className="text-center text-xs text-mint">{notice}</p>}
             </form>
           )}
 
