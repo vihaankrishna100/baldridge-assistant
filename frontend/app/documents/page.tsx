@@ -147,10 +147,10 @@ export default function DocumentsPage() {
   return (
     <AppShell>
       <div className="mb-7">
-        <h1 className="display text-[1.75rem] text-text">Documents</h1>
-        <p className="mt-1.5 text-[15px] text-muted">
-          Everything the assistant answers from. If something isn&apos;t here, staff are pointed
-          to a person instead.
+        <p className="eyebrow">The corpus</p>
+        <h1 className="display-loose mt-3 text-[2rem] text-text">Document library</h1>
+        <p className="mt-1.5 text-sm text-muted">
+          Everything the assistant can answer from. Anything not here, it will refer to a person.
         </p>
       </div>
 
@@ -163,7 +163,7 @@ export default function DocumentsPage() {
       {canManage && (
         <form
           onSubmit={upload}
-          className="mb-8 rounded-xl border border-line bg-card p-6"
+          className="lit mb-8 rounded-2xl border border-line bg-card/75 p-6"
         >
           <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-text">
             <UploadIcon className="h-4 w-4 text-cyan" /> Add or update a document
@@ -190,13 +190,14 @@ export default function DocumentsPage() {
                   setError("");
                   setFile(picked);
                 }}
-                className="w-full rounded-xl border border-line bg-ink/60 px-3.5 py-2.5 text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-raised file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-text"
+                className="w-full rounded-xl border border-line bg-ink/60 px-3.5 py-2.5 text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-cyan/15 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-cyan"
               />
-              <span className="mt-1.5 block text-[13px] leading-relaxed text-faint">
-                Over 4.5 MB? Shrink it with &ldquo;Reduced Size PDF&rdquo; in Adobe Acrobat,
-                &ldquo;Reduce File Size&rdquo; in Mac Preview, or &ldquo;Minimum size&rdquo; when
-                saving a PDF from Word &mdash; or split it into parts. Please don&apos;t use free
-                online compressors for internal documents.
+              <span className="mt-1.5 block text-[11px] leading-relaxed text-faint">
+                File too large? Shrink it first: in Adobe Acrobat, File → Save as Other → Reduced
+                Size PDF; on a Mac, open it in Preview → File → Export → Quartz Filter “Reduce File
+                Size”; from Word, File → Save As → PDF with “Minimum size”. Or split a long document
+                into parts. Avoid free online compressors for internal documents — they upload the
+                file to someone else’s server.
               </span>
             </label>
 
@@ -259,12 +260,12 @@ export default function DocumentsPage() {
             <button
               type="submit"
               disabled={busy || !file}
-              className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition enabled:hover:opacity-90 disabled:opacity-40"
+              className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition enabled:hover:brightness-110 disabled:opacity-40"
             >
               {busy ? "Processing…" : "Upload"}
             </button>
             <span className="text-[11px] text-faint">
-              Staff can ask about it as soon as it&apos;s uploaded.
+              Indexed immediately — no restart needed.
             </span>
           </div>
         </form>
@@ -289,13 +290,13 @@ export default function DocumentsPage() {
       />
 
       {Object.keys(grouped).length === 0 ? (
-        <p className="rounded-xl border border-dashed border-line px-5 py-10 text-center text-sm text-muted">
+        <p className="rounded-2xl border border-dashed border-line px-5 py-10 text-center text-sm text-muted">
           No documents yet. Until something is uploaded, every question is referred to a person.
         </p>
       ) : (
         Object.entries(grouped).map(([cat, items]) => (
           <section key={cat} className="mb-7">
-            <h2 className="mb-2.5 text-[12px] font-semibold tracking-[0.04em] text-faint uppercase">
+            <h2 className="mb-2.5 font-mono text-[10px] tracking-[0.18em] text-faint uppercase">
               {cat}
             </h2>
             <ul className="space-y-2">

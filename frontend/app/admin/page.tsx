@@ -120,32 +120,32 @@ export default function AdminPage() {
   return (
     <AppShell>
       <div className="mb-6">
-        <h1 className="display text-[1.75rem] text-text">Admin</h1>
-        <p className="mt-1.5 text-[15px] text-muted">
-          Who can sign in, how the assistant is doing, and a record of activity.
-        </p>
+        <p className="eyebrow">Control</p>
+        <h1 className="display-loose mt-3 text-[2rem] text-text">Administration</h1>
+        <p className="mt-1.5 text-sm text-muted">Access, activity, and coverage.</p>
       </div>
 
       {settings && !settings.contact_configured && (
-        <div className="mb-6 rounded-xl border border-amber/45 bg-amber/8 p-4">
-          <p className="text-sm font-medium text-amber">No office contact is set</p>
+        <div className="mb-6 rounded-2xl border border-amber/45 bg-amber/8 p-4">
+          <p className="text-sm font-medium text-amber">Fallback contact is not configured</p>
           <p className="mt-1 text-sm leading-relaxed text-muted">
-            When the assistant can&apos;t answer, it should give staff the office phone number and
-            email. Right now it has neither, so it just says to ask a supervisor. Ask whoever set
-            up this assistant to add them — it will never make one up.
+            When the assistant can&apos;t answer, it currently tells staff to ask a supervisor
+            because it has no number to give. Set <code className="text-cyan">ORG_PHONE</code> and{" "}
+            <code className="text-cyan">ORG_EMAIL</code> in <code>backend/.env</code> and restart
+            the API. It will never invent a number.
           </p>
         </div>
       )}
 
       {twoStepDone && (
-        <p className="mb-6 rounded-xl border border-mint/40 bg-mint/10 px-4 py-3 text-sm text-mint">
+        <p className="mb-6 rounded-2xl border border-mint/40 bg-mint/10 px-4 py-3 text-sm text-mint">
           Two-step sign-in is on. Next time you sign in, you&apos;ll enter a code after your
           password.
         </p>
       )}
 
       {unprotected.length > 0 && (
-        <div className="mb-6 rounded-xl border border-amber/40 bg-amber/8 p-4">
+        <div className="mb-6 rounded-2xl border border-amber/40 bg-amber/8 p-4">
           <p className="text-sm font-medium text-amber">
             {unprotected.length === 1
               ? "Heads up: this account signs in with just a password"
@@ -181,7 +181,7 @@ export default function AdminPage() {
             key={t}
             onClick={() => setTab(t)}
             className={`rounded-lg px-3.5 py-1.5 text-sm capitalize transition ${
-              tab === t ? "bg-cyan/12 text-cyan" : "text-muted hover:bg-raised hover:text-text"
+              tab === t ? "bg-cyan/12 text-cyan" : "text-muted hover:bg-white/5 hover:text-text"
             }`}
           >
             {t}
@@ -208,7 +208,7 @@ export default function AdminPage() {
             <Stat
               label="Referred to a person (30d)"
               value={stats.escalated_30d}
-              hint="Instead of guessing"
+              hint="Working as designed"
               tone="amber"
             />
           </div>
@@ -220,7 +220,7 @@ export default function AdminPage() {
             />
           )}
 
-          <section className="rounded-xl border border-line bg-card p-6">
+          <section className="rounded-2xl border border-line bg-card/70 p-6">
             <h2 className="text-sm font-semibold text-text">Where the documents fall short</h2>
             <p className="mt-1 mb-4 text-sm text-muted">
               Questions staff asked that nothing in the library answered. Each one is a candidate
@@ -246,7 +246,7 @@ export default function AdminPage() {
           </section>
 
           {settings && (
-            <section className="rounded-xl border border-line bg-card p-6">
+            <section className="rounded-2xl border border-line bg-card/70 p-6">
               <h2 className="mb-4 text-sm font-semibold text-text">Settings</h2>
               <dl className="grid gap-x-8 gap-y-2.5 text-sm sm:grid-cols-2">
                 <Row label="AI model" value={settings.model} />
@@ -285,7 +285,7 @@ export default function AdminPage() {
         <div className="space-y-6">
           <TeamLogin team={users.find((u) => u.role === "team")} onChange={load} />
 
-          <section className="rounded-xl border border-line bg-card p-6">
+          <section className="rounded-2xl border border-line bg-card/70 p-6">
             <h2 className="text-sm font-semibold text-text">Invite a team member</h2>
             <p className="mt-1 mb-4 text-sm text-muted">
               Their own account, with their own history and two-factor. Use this for leadership,
@@ -309,7 +309,7 @@ export default function AdminPage() {
                 <option value="leadership">Leadership</option>
                 <option value="admin">Administrator</option>
               </select>
-              <button className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition hover:opacity-90">
+              <button className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition hover:brightness-110">
                 Create link
               </button>
             </form>
@@ -360,7 +360,7 @@ export default function AdminPage() {
             )}
           </section>
 
-          <section className="rounded-xl border border-line bg-card p-6">
+          <section className="rounded-2xl border border-line bg-card/70 p-6">
             <h2 className="mb-4 text-sm font-semibold text-text">Accounts</h2>
             <ul className="space-y-2">
               {users.filter((u) => u.role !== "team").map((u) => (
@@ -426,7 +426,7 @@ export default function AdminPage() {
       )}
 
       {tab === "audit" && (
-        <section className="overflow-hidden rounded-xl border border-line bg-card/50">
+        <section className="overflow-hidden rounded-2xl border border-line bg-card/50">
           <div className="border-b border-line px-5 py-3.5">
             <h2 className="text-sm font-semibold text-text">Audit trail</h2>
             <p className="mt-0.5 text-xs text-muted">
@@ -481,8 +481,8 @@ function Stat({
   tone?: "amber";
 }) {
   return (
-    <div className="rounded-xl border border-line bg-card p-5">
-      <p className="text-[12px] font-semibold tracking-[0.04em] text-faint uppercase">{label}</p>
+    <div className="lit rounded-2xl border border-line bg-card/70 p-5">
+      <p className="font-mono text-[10px] tracking-[0.16em] text-faint uppercase">{label}</p>
       <p className={`display mt-2 text-[1.9rem] ${tone === "amber" ? "text-amber" : "text-text"}`}>
         {value}
       </p>
@@ -538,7 +538,7 @@ function TeamLogin({ team, onChange }: { team?: User; onChange: () => Promise<vo
   };
 
   return (
-    <section className="rounded-xl border border-line bg-card p-6">
+    <section className="rounded-2xl border border-line bg-card/70 p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 className="text-sm font-semibold text-text">Team login</h2>
         <span className={`text-xs ${active ? "text-mint" : "text-faint"}`}>
@@ -574,7 +574,7 @@ function TeamLogin({ team, onChange }: { team?: User; onChange: () => Promise<vo
         />
         <button
           disabled={busy}
-          className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition enabled:hover:opacity-90 disabled:opacity-40"
+          className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition enabled:hover:brightness-110 disabled:opacity-40"
         >
           {busy ? "Saving…" : !team ? "Create team login" : active ? "Change" : "Turn on"}
         </button>

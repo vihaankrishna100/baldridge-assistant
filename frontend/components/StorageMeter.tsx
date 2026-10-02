@@ -23,7 +23,7 @@ export default function StorageMeter({
   const parts = Object.entries(breakdown ?? {}).filter(([, n]) => n > 0);
 
   return (
-    <section className="rounded-xl border border-line bg-card p-6">
+    <section className="rounded-2xl border border-line bg-card/70 p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 className="text-sm font-semibold text-text">Database storage</h2>
         <p className="text-sm text-muted">

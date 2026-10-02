@@ -1,48 +1,114 @@
+import { LogoMark } from "@/components/Logo";
+import { ShieldIcon } from "@/components/Icons";
+
+const TOPICS = ["Incident reports", "Volunteer check-in", "Transportation", "Time off"];
+
 /**
- * A still of the assistant answering a real-shaped question. Built from the
- * same tokens as the app, so it shows exactly what staff will see in either
- * theme.
+ * The floating product card. Rendered as real DOM rather than SVG so the text
+ * uses the same faces and hinting as the rest of the app — at this size, SVG
+ * text renders noticeably softer.
  */
 export default function HeroCard() {
   return (
-    <div className="surface mx-auto w-full max-w-[500px] overflow-hidden rounded-xl border border-line bg-card">
-      <div className="flex items-center justify-between border-b border-line px-5 py-3">
-        <span className="font-display text-[13px] font-semibold text-text">Ask a question</span>
-        <span className="text-[12px] text-faint">Answers from Lodge documents</span>
-      </div>
+    <div className="relative mx-auto w-full max-w-[520px]">
+      {/* ---------------- decorative arcs ---------------- */}
+      {/* Radii deliberately exceed half the card width so the rings clear its
+          edges — anything smaller just hides behind the panel. */}
+      <svg
+        viewBox="0 0 700 700"
+        className="pointer-events-none absolute top-1/2 left-1/2 -z-10 h-[190%] w-[190%] -translate-x-1/2 -translate-y-1/2"
+        aria-hidden="true"
+      >
+        <defs>
+          <radialGradient id="hc-halo" cx="0.5" cy="0.5">
+            <stop offset="0%" style={{ stopColor: "var(--c-indigo)" }} stopOpacity="0.19" />
+            <stop offset="62%" style={{ stopColor: "var(--c-indigo)" }} stopOpacity="0.05" />
+            <stop offset="100%" style={{ stopColor: "var(--c-indigo)" }} stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        <circle cx="350" cy="350" r="290" fill="url(#hc-halo)" />
+        <circle cx="350" cy="350" r="232" fill="none" style={{ stroke: "var(--ring)" }} strokeOpacity="0.85" />
+        <circle
+          cx="350"
+          cy="350"
+          r="292"
+          fill="none"
+          style={{ stroke: "var(--ring-soft)" }}
+          strokeOpacity="0.7"
+          strokeDasharray="2 8"
+        />
+        <path
+          d="M700 40 C 600 190, 430 250, 250 268 S 20 360, -20 560"
+          fill="none"
+          style={{ stroke: "var(--ring-soft)" }}
+          strokeOpacity="0.75"
+        />
+      </svg>
 
-      <div className="space-y-5 px-5 py-6">
-        <div className="ml-auto w-fit max-w-[85%] rounded-lg bg-raised px-3.5 py-2.5 text-[14px] text-text">
-          How soon do I need to file an incident report?
+      {/* ---------------- the card ---------------- */}
+      <div className="lit relative rounded-2xl border border-line bg-card/95 p-6 shadow-2xl shadow-shade/55 backdrop-blur-sm sm:p-7">
+        <div className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-2.5 rounded-xl border border-line-soft bg-ink/60 px-3 py-2">
+            <LogoMark className="h-6 w-6" />
+            <span className="text-[12.5px] font-semibold tracking-[0.02em] whitespace-nowrap text-text uppercase">
+              Bald Ridge Lodge
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2 rounded-full border border-mint/25 bg-mint/10 px-3 py-1.5 text-[11px] font-medium whitespace-nowrap text-mint">
+            <span className="h-1.5 w-1.5 rounded-full bg-mint" />
+            Cited answers
+          </span>
         </div>
 
-        <div className="text-[14.5px] leading-relaxed text-text">
-          Within <strong className="font-semibold">24 hours</strong> of the incident, on Form
-          IR-2. Your shift supervisor signs it before it goes to the program director.
-          <Cite n={1} />
+        <p className="eyebrow mt-7">One binder, one answer</p>
+        <h2 className="display mt-2.5 text-[22px] leading-snug text-text">
+          Ask plainly. Check the page.
+        </h2>
+        <p className="mt-3 text-[13.5px] leading-relaxed text-muted">
+          Staff get a short answer, the exact document and page it came from, and the front
+          office number whenever our documents don&apos;t actually cover the question.
+        </p>
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          {TOPICS.map((t) => (
+            <span
+              key={t}
+              className="rounded-lg border border-line-soft bg-raised/70 px-2.5 py-1.5 text-[11.5px] text-muted"
+            >
+              {t}
+            </span>
+          ))}
         </div>
 
-        <div className="rounded-lg border border-line-soft">
-          <div className="flex items-center gap-2.5 px-3.5 py-2.5">
-            <Cite n={1} />
-            <span className="text-[13px] font-medium text-text">Incident Reporting Policy</span>
-            <span className="ml-auto text-[12px] text-faint">Page 4</span>
+        {/* a real cited line, so the card demonstrates rather than describes */}
+        <div className="mt-6 rounded-xl border border-line-soft bg-ink/55 p-4">
+          <p className="text-[13.5px] leading-relaxed text-text">
+            <span className="font-semibold">Within 24 hours</span>
+            <span className="text-muted">, on Form IR-2.</span>
+            <span className="ml-1.5 inline-flex h-[1.15rem] min-w-[1.15rem] items-center justify-center rounded-[5px] bg-cyan/15 px-1 align-baseline text-[0.7rem] font-semibold text-cyan">
+              1
+            </span>
+          </p>
+          <div className="mt-3 flex items-center gap-2.5 border-t border-line-soft pt-3">
+            <span className="grid h-[1.15rem] min-w-[1.15rem] place-items-center rounded-[5px] bg-cyan/15 px-1 text-[0.7rem] font-semibold text-cyan">
+              1
+            </span>
+            <span className="text-[12px] text-muted">Incident Reporting Policy</span>
+            <span className="font-mono text-[11px] text-faint">· page 4</span>
           </div>
         </div>
       </div>
 
-      <div className="border-t border-line bg-raised/60 px-5 py-3 text-[12.5px] text-muted">
-        Not covered in the documents? You&apos;ll be pointed to the front office instead of a
-        guess.
+      {/* ---------------- floating callout ---------------- */}
+      <div className="absolute -right-2 -bottom-9 flex max-w-[252px] items-start gap-2.5 rounded-xl border border-line bg-raised px-4 py-3 shadow-2xl shadow-shade/60 sm:-right-10">
+        <ShieldIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber" />
+        <span className="leading-tight">
+          <span className="block text-[12.5px] font-medium text-text">Citation required</span>
+          <span className="block text-[11.5px] text-faint">
+            An uncited answer is discarded, not shown
+          </span>
+        </span>
       </div>
     </div>
-  );
-}
-
-function Cite({ n }: { n: number }) {
-  return (
-    <span className="ml-1 inline-grid h-[1.2rem] min-w-[1.2rem] place-items-center rounded bg-cyan/12 px-1 align-[0.1em] text-[11px] font-semibold text-cyan">
-      {n}
-    </span>
   );
 }

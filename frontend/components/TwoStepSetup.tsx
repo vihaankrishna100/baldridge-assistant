@@ -72,7 +72,7 @@ export default function TwoStepSetup({ onDone }: { onDone: () => void | Promise<
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="mt-3 rounded-xl bg-amber px-4 py-2 text-sm font-semibold text-ink transition hover:opacity-90"
+        className="mt-3 rounded-xl bg-amber px-4 py-2 text-sm font-semibold text-ink transition hover:brightness-110"
       >
         Set up two-step sign-in
       </button>
@@ -89,7 +89,7 @@ export default function TwoStepSetup({ onDone }: { onDone: () => void | Promise<
               type="button"
               disabled={busy}
               onClick={() => void start("app")}
-              className="rounded-xl border border-line bg-card p-3.5 text-left transition hover:border-cyan/50 disabled:opacity-50"
+              className="rounded-xl border border-line bg-card/70 p-3.5 text-left transition hover:border-cyan/50 disabled:opacity-50"
             >
               <span className="block text-sm font-medium text-text">Authenticator app</span>
               <span className="mt-0.5 block text-xs text-muted">
@@ -100,7 +100,7 @@ export default function TwoStepSetup({ onDone }: { onDone: () => void | Promise<
               type="button"
               disabled={busy || !options?.email_available}
               onClick={() => void start("email")}
-              className="rounded-xl border border-line bg-card p-3.5 text-left transition hover:border-cyan/50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-xl border border-line bg-card/70 p-3.5 text-left transition hover:border-cyan/50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span className="block text-sm font-medium text-text">Email</span>
               <span className="mt-0.5 block text-xs text-muted">
@@ -154,7 +154,7 @@ export default function TwoStepSetup({ onDone }: { onDone: () => void | Promise<
           <div className="flex flex-wrap gap-2">
             <button
               disabled={busy || code.length !== 6}
-              className="rounded-xl bg-cyan px-4 py-2 text-sm font-semibold text-ink transition enabled:hover:opacity-90 disabled:opacity-40"
+              className="rounded-xl bg-cyan px-4 py-2 text-sm font-semibold text-ink transition enabled:hover:brightness-110 disabled:opacity-40"
             >
               {busy ? "Checking…" : "Turn on"}
             </button>

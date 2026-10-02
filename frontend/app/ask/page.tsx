@@ -140,12 +140,13 @@ export default function ChatPage() {
     <AppShell>
       <div className="mx-auto flex min-h-[calc(100vh-14rem)] max-w-3xl flex-col">
         {turns.length === 0 ? (
-          <div className="py-4">
-            <h1 className="display text-[1.9rem] leading-tight text-text">
-              Hi {user.full_name?.split(" ")[0] || "there"}, what do you
+          <div className="reveal py-4">
+            <p className="eyebrow">Ask the binder</p>
+            <h1 className="display-loose mt-4 text-[2.1rem] leading-tight text-text">
+              Hi {user.full_name?.split(" ")[0] || "there"} — what do you
               <br className="hidden sm:block" /> need to look up?
             </h1>
-            <p className="mt-3 max-w-lg text-[15.5px] leading-relaxed text-muted">
+            <p className="mt-4 max-w-lg text-sm leading-relaxed text-muted">
               I answer from Bald Ridge Lodge&apos;s own handbooks, policies, and procedures, and
               I cite the exact document and page. If the documents don&apos;t cover it, I&apos;ll
               point you to a person instead of guessing.
@@ -170,7 +171,7 @@ export default function ChatPage() {
             {turns.map((turn) =>
               turn.kind === "question" ? (
                 <div key={turn.id} className="flex justify-end">
-                  <div className="max-w-[85%] animate-fade-up rounded-xl rounded-br-md border border-indigo/25 bg-indigo/15 px-4 py-2.5 text-[15px] text-text">
+                  <div className="max-w-[85%] animate-fade-up rounded-2xl rounded-br-md border border-indigo/25 bg-indigo/15 px-4 py-2.5 text-[15px] text-text">
                     {turn.text}
                   </div>
                 </div>
@@ -179,7 +180,7 @@ export default function ChatPage() {
                   {turn.escalation ? (
                     <EscalationCard data={turn.escalation} />
                   ) : (
-                    <div className="rounded-xl border border-line bg-card p-6">
+                    <div className="lit rounded-2xl border border-line bg-card/80 p-6">
                       {turn.general && !turn.streaming && (
                         <p className="mb-4 flex items-start gap-2 rounded-lg border border-amber/30 bg-amber/[0.07] px-3 py-2 text-[12px] leading-relaxed text-amber">
                           <svg viewBox="0 0 16 16" className="mt-px h-3.5 w-3.5 shrink-0" fill="currentColor" aria-hidden>
@@ -214,7 +215,7 @@ export default function ChatPage() {
                               <li key={c.n}>
                                 <button
                                   onClick={() => setOpenSource(c)}
-                                  className="flex w-full items-start gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-raised"
+                                  className="flex w-full items-start gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-white/5"
                                 >
                                   <span className="mt-0.5 grid h-[1.15rem] min-w-[1.15rem] place-items-center rounded-[5px] bg-cyan/15 px-1 text-[0.7rem] font-semibold text-cyan">
                                     {c.n}
@@ -254,7 +255,7 @@ export default function ChatPage() {
           }}
           className="sticky bottom-6 mt-auto pt-6"
         >
-          <div className="rounded-xl border border-line bg-raised/95 p-2 surface backdrop-blur transition focus-within:border-cyan/45">
+          <div className="rounded-2xl border border-line bg-raised/95 p-2 shadow-2xl shadow-shade/50 backdrop-blur-xl transition focus-within:border-cyan/45">
             <textarea
               ref={textareaRef}
               value={input}
@@ -278,7 +279,7 @@ export default function ChatPage() {
               <button
                 type="submit"
                 disabled={busy || !input.trim()}
-                className="flex items-center gap-1.5 rounded-xl bg-cyan px-4 py-1.5 text-sm font-semibold text-ink transition enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
+                className="flex items-center gap-1.5 rounded-xl bg-cyan px-4 py-1.5 text-sm font-semibold text-ink transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-35"
               >
                 {busy ? "Looking…" : "Ask"}
                 {!busy && <ArrowIcon className="h-3.5 w-3.5" />}
@@ -290,11 +291,11 @@ export default function ChatPage() {
 
       {openSource && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5 backdrop-blur"
+          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"
           onClick={() => setOpenSource(null)}
         >
           <div
-            className="max-h-[80vh] w-full max-w-2xl animate-fade-up overflow-auto rounded-xl border border-line bg-card p-6"
+            className="lit max-h-[80vh] w-full max-w-2xl animate-fade-up overflow-auto rounded-2xl border border-line bg-card p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
@@ -307,7 +308,7 @@ export default function ChatPage() {
               </div>
               <button
                 onClick={() => setOpenSource(null)}
-                className="rounded-lg px-2 py-1 text-sm text-muted hover:bg-raised"
+                className="rounded-lg px-2 py-1 text-sm text-muted hover:bg-white/5"
               >
                 Close
               </button>

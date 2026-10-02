@@ -19,7 +19,7 @@ export default function ThemeToggle({ className = "" }: { className?: string }) 
       }}
       aria-label={`Switch to ${next} mode`}
       title={`Switch to ${next} mode`}
-      className={`grid h-9 w-9 place-items-center rounded-lg border border-line text-muted transition hover:bg-raised hover:text-text ${className}`}
+      className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line text-muted transition hover:border-cyan/40 hover:text-cyan ${className}`}
     >
       {theme === "dark" ? (
         <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>

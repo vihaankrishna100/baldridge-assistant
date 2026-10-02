@@ -1,84 +1,70 @@
+/* eslint-disable @next/next/no-img-element */
+
 /**
- * Bald Ridge Lodge's actual logo, from baldridgelodge.org. Two assets in
- * `public/`, both white on transparent:
+ * Bald Ridge Lodge's actual logo, taken from baldridgelodge.org — not a
+ * redrawing. Two assets in `public/`:
  *
- *   logo-mark.png  the square B mark (160×160)
- *   logo-full.png  mark plus the three-line wordmark (382×153)
+ *   logo-mark.png  the square B mark, padded to a true square so it never
+ *                  distorts in a fixed-size slot
+ *   logo-full.png  the full lockup, mark plus the three-line wordmark
  *
- * They are drawn as CSS masks (.brand-logo) so the same file renders white on
- * navy and navy on paper. To use new artwork, replace the files and, if the
- * proportions change, the aspect ratio below.
+ * Both are white on transparent, which is why they are only ever placed on a
+ * dark surface. If the Lodge sends updated artwork, replace the files — no
+ * code here needs to change.
  */
 
-export function LogoMark({
-  className = "h-9 w-9",
-  tone,
-}: {
-  className?: string;
-  /** Force a colour, e.g. white on the always-navy sign-in panel. */
-  tone?: string;
-}) {
+export function LogoMark({ className = "h-9 w-9" }: { className?: string }) {
   return (
-    <span
-      role="img"
+    <img
+      src="/logo-mark.png"
+      alt=""
       aria-hidden="true"
-      className={`brand-logo shrink-0 ${className}`}
-      style={{
-        maskImage: "url(/logo-mark.png)",
-        WebkitMaskImage: "url(/logo-mark.png)",
-        ...(tone ? { backgroundColor: tone } : {}),
-      }}
+      className={`logo-art ${className} object-contain`}
     />
   );
 }
 
 export default function Logo({
   size = "md",
-  subtitle = "Staff Assistant",
+  subtitle = "Internal Assistant",
+  /** Use the full lockup (mark + three-line wordmark) instead of mark + text. */
   lockup = false,
-  tone,
+  /** Show only the mark on phone-width screens, to leave room in a header. */
   collapse = false,
 }: {
   size?: "sm" | "md" | "lg";
   subtitle?: string | null;
-  /** The full lockup (mark + three-line wordmark) instead of mark + text. */
   lockup?: boolean;
-  tone?: string;
-  /** Show only the mark on phone-width screens, to leave room in a header. */
   collapse?: boolean;
 }) {
   if (lockup) {
-    const width = size === "lg" ? "w-52" : size === "sm" ? "w-28" : "w-40";
+    const width = size === "lg" ? "w-56" : size === "sm" ? "w-32" : "w-44";
     return (
-      <span
-        role="img"
-        aria-label="Bald Ridge Lodge"
-        className={`brand-logo ${width}`}
-        style={{
-          aspectRatio: "382 / 153",
-          maskImage: "url(/logo-full.png)",
-          WebkitMaskImage: "url(/logo-full.png)",
-          ...(tone ? { backgroundColor: tone } : {}),
-        }}
+      <img
+        src="/logo-full.png"
+        alt="Bald Ridge Lodge"
+        className={`logo-art ${width} h-auto object-contain`}
       />
     );
   }
 
-  const mark = size === "lg" ? "h-12 w-12" : size === "sm" ? "h-7 w-7" : "h-9 w-9";
-  const type = size === "lg" ? "text-[18px]" : size === "sm" ? "text-[13px]" : "text-[14px]";
+  const mark = size === "lg" ? "h-14 w-14" : size === "sm" ? "h-8 w-8" : "h-10 w-10";
+  const type =
+    size === "lg" ? "text-[19px]" : size === "sm" ? "text-[13px]" : "text-[15px]";
 
   return (
-    <span className="flex items-center gap-2.5">
-      <LogoMark className={mark} tone={tone} />
+    <span className="flex items-center gap-3">
+      <LogoMark className={`${mark} shrink-0`} />
       <span className={`leading-none ${collapse ? "hidden sm:block" : ""}`}>
         <span
-          className={`block font-display font-bold tracking-[0.04em] whitespace-nowrap uppercase ${type}`}
-          style={tone ? { color: tone } : { color: "var(--logo)" }}
+          className={`block font-semibold tracking-[0.02em] whitespace-nowrap text-text uppercase ${type}`}
         >
           Bald Ridge Lodge
         </span>
         {subtitle && (
-          <span className="mt-1 hidden text-[12px] text-faint sm:block">{subtitle}</span>
+          <span className="mt-1.5 hidden font-mono text-[10px] tracking-[0.16em] text-faint uppercase sm:block">
+            {subtitle}
+          </span>
         )}
       </span>
     </span>

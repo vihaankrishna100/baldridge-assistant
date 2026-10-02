@@ -2,7 +2,6 @@
 
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Logo from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
 import { api } from "@/lib/api";
 import { useAuth, type User } from "@/lib/auth";
@@ -94,7 +93,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   if (loadError) {
     return (
       <div className="grid min-h-screen place-items-center px-5">
-        <div className="max-w-md rounded-xl border border-rose/40 bg-rose/8 p-7 text-center">
+        <div className="max-w-md rounded-2xl border border-rose/40 bg-rose/8 p-7 text-center">
           <h1 className="font-semibold text-text">Invitation unavailable</h1>
           <p className="mt-2 text-sm text-muted">{loadError}</p>
         </div>
@@ -107,17 +106,13 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <div className="flex items-center justify-between px-5 py-4 sm:px-8">
-        <Logo size="sm" subtitle={null} />
-        <ThemeToggle />
-      </div>
-      <div className="flex flex-1 items-center justify-center px-5 pb-16">
-      <div className="surface w-full max-w-md animate-fade-up rounded-xl border border-line bg-card p-7">
+    <div className="grid min-h-screen place-items-center px-5 py-10">
+      <ThemeToggle className="fixed top-5 right-5 z-10" />
+      <div className="w-full max-w-md animate-fade-up rounded-2xl border border-line bg-card/80 p-7">
         {!setup ? (
           <form onSubmit={accept} className="space-y-4">
             <div>
-              <h1 className="display text-[1.4rem] text-text">Join {info.org_name}</h1>
+              <h1 className="text-lg font-semibold text-text">Join {info.org_name}</h1>
               <p className="mt-1 text-sm text-muted">
                 Setting up the account for <span className="text-cyan">{info.email}</span>.
               </p>
@@ -162,7 +157,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-xl bg-cyan py-2.5 text-sm font-semibold text-ink transition enabled:hover:opacity-90 disabled:opacity-50"
+              className="w-full rounded-xl bg-cyan py-2.5 text-sm font-semibold text-ink transition enabled:hover:brightness-110 disabled:opacity-50"
             >
               {busy ? "Creating…" : "Create account"}
             </button>
@@ -192,7 +187,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-xl bg-cyan py-2.5 text-sm font-semibold text-ink transition enabled:hover:opacity-90 disabled:opacity-50"
+              className="w-full rounded-xl bg-cyan py-2.5 text-sm font-semibold text-ink transition enabled:hover:brightness-110 disabled:opacity-50"
             >
               {busy ? "Verifying…" : "Finish setup"}
             </button>
@@ -204,7 +199,6 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
             {error}
           </p>
         )}
-      </div>
       </div>
     </div>
   );
