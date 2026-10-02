@@ -86,7 +86,7 @@ def run_migrations() -> None:
     _ensure()
     inspector = inspect(_engine)
     existing_tables = set(inspector.get_table_names())
-    with engine.begin() as conn:
+    with _engine.begin() as conn:
         for table, column, ddl in MIGRATIONS:
             if table not in existing_tables:
                 continue
