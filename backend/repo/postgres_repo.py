@@ -543,3 +543,22 @@ class PostgresRepo:
         with get_pool().connection() as c:
             c.execute(ddl)
 
+    # ------------------------------------------------- document bytes (blobs)
+
+    def put_blob(self, document_id: str, content: bytes) -> None:
+        with get_pool().connection() as c:
+            c.execute(
+                """INSERT INTO document_blobs (document_id, content) VALUES (%s, %s)
+                   ON CONFLICT (document_id) DO UPDATE SET content = EXCLUDED.content""",
+                (document_id, content))
+
+    def get_blob(self, document_id: str) -> bytes | None:
+        with get_pool().connection() as c:
+            row = c.execute(
+                "SELECT content FROM document_blobs WHERE document_id = %s",
+                (document_id,)).fetchone()
+        return bytes(row["content"]) if row else None
+
+    def delete_blob(self, document_id: str) -> None:
+        with get_pool().connection() as c:
+            c.execute("DELETE FROM document_blobs WHERE document_id = %s", (document_id,))
