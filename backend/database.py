@@ -25,12 +25,50 @@ class Base(DeclarativeBase):
     """Declarative base. Importing this must not require a database."""
 
 
-class Base(DeclarativeBase):
-    pass
+_engine = None
+_session_factory = None
+
+
+def _resolve_url() -> str:
+    url = settings.database_url
+    if url.startswith("sqlite:///./"):
+        db_path = BASE_DIR / url.replace("sqlite:///./", "")
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        url = f"sqlite:///{db_path}"
+    return url
+
+
+def _ensure() -> None:
+    global _engine, _session_factory
+    if _engine is None:
+        url = _resolve_url()
+        _engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False} if url.startswith("sqlite") else {},
+        )
+        _session_factory = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
+
+
+def __getattr__(name: str):
+    """Lazy module attributes.
+
+    `database.engine` and `database.SessionLocal` keep working for every
+    existing caller, including selftest.py, which assigns over them to point
+    at an in-memory database. A direct assignment creates a real module
+    attribute, which shadows this hook from then on.
+    """
+    if name == "engine":
+        _ensure()
+        return _engine
+    if name == "SessionLocal":
+        _ensure()
+        return _session_factory
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_db():
-    db = SessionLocal()
+    _ensure()
+    db = _session_factory()
     try:
         yield db
     finally:
@@ -45,7 +83,8 @@ MIGRATIONS: list[tuple[str, str, str]] = [
 
 
 def run_migrations() -> None:
-    inspector = inspect(engine)
+    _ensure()
+    inspector = inspect(_engine)
     existing_tables = set(inspector.get_table_names())
     with engine.begin() as conn:
         for table, column, ddl in MIGRATIONS:
