@@ -518,3 +518,21 @@ class PostgresRepo:
                 (since, limit)).fetchall()
         return [(r["target"], r["n"]) for r in rows]
 
+    # ----------------------------------------------------------- rate limit
+
+    def bump_query_counter(self, user_id: str, hour_bucket: str, limit: int) -> bool:
+        """Atomic. The SQLite version reads then writes, so two questions sent
+        at once can both see count == limit-1 and both be allowed. Here the
+        upsert and the check are one statement, and a row that is already at
+        the cap updates nothing and returns no row."""
+        with get_pool().connection() as c:
+            row = c.execute(
+                """INSERT INTO query_counters (user_id, hour_bucket, count)
+                   VALUES (%s, %s, 1)
+                   ON CONFLICT (user_id, hour_bucket) DO UPDATE
+                       SET count = query_counters.count + 1
+                       WHERE query_counters.count < %s
+                   RETURNING count""",
+                (user_id, hour_bucket, limit)).fetchone()
+        return row is not None
+
