@@ -1,3 +1,4 @@
+import os
 import threading
 
 import audit
@@ -16,7 +17,12 @@ from routes import admin, auth, chat, documents
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = get_repo()
-    store.bootstrap()
+    # On a serverless platform the lifespan runs on every cold start, and the
+    # DDL is the same every time. It is idempotent, so running it is safe, but
+    # it is latency nobody needs once the schema exists — set SKIP_BOOTSTRAP=1
+    # in production and run it from the deploy step instead.
+    if os.getenv("SKIP_BOOTSTRAP", "").strip() not in ("1", "true", "yes"):
+        store.bootstrap()
     print(f"[startup] store: {type(store).__name__}")
 
     # Built off the request path. Signing in and loading the UI need nothing
