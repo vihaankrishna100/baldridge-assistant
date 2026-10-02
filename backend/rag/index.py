@@ -507,6 +507,7 @@ class HybridIndex:
                 "chunks": len(self._entries),
                 "documents": len({e.document_id for e in self._entries}),
                 "semantic_enabled": self._dense is not None,
+                "engine": "memory",
             }
 
 
