@@ -22,3 +22,5 @@ frontend/next-env.d.ts
 
 # Build info
 frontend/tsconfig.tsbuildinfo
+.vercel
+.env*
