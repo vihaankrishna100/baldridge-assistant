@@ -303,13 +303,61 @@ class PostgresRepo:
             )
 
     def delete_document(self, document_id: str) -> None:
-        # chunks and document_blobs cascade.
-        with get_pool().connection() as c:
+        # Chunks no longer reference documents (see schema.sql), so they are
+        # removed explicitly; document_blobs still cascades.
+        with get_pool().connection() as c, c.transaction():
+            c.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
             c.execute("DELETE FROM documents WHERE id = %s", (document_id,))
 
     def count_active_documents(self) -> int:
+        # Counted from the search copy so it holds whether document metadata
+        # lives in this database or in GitHub.
         with get_pool().connection() as c:
-            return c.execute("SELECT count(*) AS n FROM documents WHERE is_active").fetchone()["n"]
+            return c.execute(
+                "SELECT count(DISTINCT document_id) AS n FROM chunks WHERE document_active"
+            ).fetchone()["n"]
+
+    # ------------------------------------------- search copy (GitHub mode)
+    # When documents live in GitHub, these are the only document writes this
+    # database sees: passages keyed by document id, with no documents row.
+
+    def ensure_search_copy_schema(self) -> None:
+        with get_pool().connection() as c:
+            c.execute("ALTER TABLE chunks DROP CONSTRAINT IF EXISTS chunks_document_id_fkey")
+
+    def put_chunks(self, document_id: str, chunks: list[ChunkRecord]) -> None:
+        with get_pool().connection() as c, c.transaction():
+            c.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
+            if chunks:
+                with c.cursor() as cur:
+                    cur.executemany(
+                        """INSERT INTO chunks (id, document_id, ordinal, heading, page,
+                               text, document_title, category, visibility, document_active)
+                           VALUES (%(id)s, %(document_id)s, %(ordinal)s, %(heading)s,
+                               %(page)s, %(text)s, %(document_title)s, %(category)s,
+                               %(visibility)s, %(document_active)s)""",
+                        [ch.__dict__ for ch in chunks],
+                    )
+
+    def set_chunks_meta(
+        self, document_id: str, title: str, category: str, visibility: str, active: bool
+    ) -> None:
+        with get_pool().connection() as c:
+            c.execute(
+                """UPDATE chunks SET document_title=%s, category=%s, visibility=%s,
+                       document_active=%s
+                   WHERE document_id=%s""",
+                (title, category, visibility, active, document_id),
+            )
+
+    def delete_chunks(self, document_id: str) -> None:
+        with get_pool().connection() as c:
+            c.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
+
+    def chunk_document_ids(self) -> set[str]:
+        with get_pool().connection() as c:
+            rows = c.execute("SELECT DISTINCT document_id FROM chunks").fetchall()
+        return {r["document_id"] for r in rows}
 
     # --------------------------------------------------------------- chunks
 

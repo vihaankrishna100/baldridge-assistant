@@ -212,7 +212,7 @@ def stats(_: UserRecord = Depends(require_admin)):
 
 @router.get("/settings")
 def read_settings(_: UserRecord = Depends(require_admin)):
-    from blobs import get_blobs
+    from docstore import get_docstore
 
     return {
         "org_name": settings.org_name,
@@ -227,6 +227,6 @@ def read_settings(_: UserRecord = Depends(require_admin)):
         "retrieval_top_k": settings.retrieval_top_k,
         "retrieval_min_score": settings.retrieval_min_score,
         "max_queries_per_hour": settings.max_queries_per_hour,
-        "storage": type(get_blobs()).__name__,
+        "storage": type(get_docstore()).__name__,
         "repo": type(get_repo()).__name__,
     }

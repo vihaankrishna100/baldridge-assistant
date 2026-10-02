@@ -3,7 +3,10 @@ name: tests
 on:
   push:
     branches: [main]
+    # Uploads commit here from the app; they change no code.
+    paths-ignore: ["documents/**"]
   pull_request:
+    paths-ignore: ["documents/**"]
   workflow_dispatch:
 
 jobs:

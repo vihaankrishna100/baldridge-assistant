@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS document_blobs (
 -- them whenever the parent changes.
 CREATE TABLE IF NOT EXISTS chunks (
     id              TEXT PRIMARY KEY,
-    document_id     TEXT NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+    document_id     TEXT NOT NULL,
     ordinal         INTEGER NOT NULL DEFAULT 0,
     heading         TEXT NOT NULL DEFAULT '',
     page            INTEGER,
@@ -112,6 +112,11 @@ CREATE TABLE IF NOT EXISTS chunks (
         setweight(to_tsvector('english', coalesce(text, '')), 'A')
     ) STORED
 );
+
+-- Chunks are a search copy that may belong to a document kept in GitHub, with
+-- no row in `documents`, so they cannot reference it. Dropped for databases
+-- created before that change; delete_document removes chunks explicitly.
+ALTER TABLE chunks DROP CONSTRAINT IF EXISTS chunks_document_id_fkey;
 
 CREATE INDEX IF NOT EXISTS chunks_search_idx ON chunks USING GIN (search_vector);
 CREATE INDEX IF NOT EXISTS chunks_document_idx ON chunks (document_id, ordinal);

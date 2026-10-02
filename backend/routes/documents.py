@@ -6,19 +6,35 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import Response
 
 import audit
-from blobs import get_blobs
 from config import settings
 from deps import current_user, require_leadership
+from docstore import DocumentMissing, DuplicateDocument, GitHubDocStore, get_docstore
 from models import VISIBILITIES, VISIBILITY_STAFF, visible_tiers_for_role
 from rag import redact
 from rag.chunker import chunk_pages
 from rag.extract import ExtractionError, extract
 from rag.index import index
-from repo import get_repo
 from repo.base import ChunkRecord, DocumentRecord, UserRecord, utcnow
 from schemas import DocumentOut, DocumentUpdate
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+def _chunks_for(doc: DocumentRecord, proto_chunks) -> list[ChunkRecord]:
+    return [
+        ChunkRecord(
+            document_id=doc.id,
+            ordinal=p.ordinal,
+            heading=p.heading[:300],
+            page=p.page,
+            text=p.text,
+            document_title=doc.title,
+            category=doc.category,
+            visibility=doc.visibility,
+            document_active=doc.is_active,
+        )
+        for p in proto_chunks
+    ]
 
 
 @router.get("", response_model=list[DocumentOut])
@@ -30,7 +46,7 @@ def list_documents(
     show_retired = include_inactive and user.role != "staff"
     docs = [
         d
-        for d in get_repo().list_documents(include_inactive=show_retired)
+        for d in get_docstore().list_documents(include_inactive=show_retired)
         if d.visibility in tiers
     ]
     return [DocumentOut.model_validate(d) for d in docs]
@@ -46,7 +62,7 @@ async def upload_document(
     replaces: str = Form(""),
     user: UserRecord = Depends(require_leadership),
 ):
-    store = get_repo()
+    docs = get_docstore()
 
     if visibility not in VISIBILITIES:
         raise HTTPException(status_code=400, detail="Unknown visibility level.")
@@ -70,7 +86,7 @@ async def upload_document(
     full_text = "\n\n".join(text for _, text in pages)
     checksum = hashlib.sha256(data).hexdigest()
 
-    duplicate = store.find_active_document_by_checksum(checksum)
+    duplicate = docs.find_active_by_checksum(checksum)
     if duplicate and not replaces:
         raise HTTPException(
             status_code=409,
@@ -84,7 +100,7 @@ async def upload_document(
     version = 1
     previous = None
     if replaces:
-        previous = store.get_document(replaces)
+        previous = docs.get_document(replaces)
         if previous is None:
             raise HTTPException(status_code=404, detail="The document being replaced no longer exists.")
         version = previous.version + 1
@@ -104,36 +120,18 @@ async def upload_document(
         uploaded_by=user.id,
     )
 
-    chunks = [
-        ChunkRecord(
-            document_id=doc.id,
-            ordinal=p.ordinal,
-            heading=p.heading[:300],
-            page=p.page,
-            text=p.text,
-            document_title=doc.title,
-            category=doc.category,
-            visibility=doc.visibility,
-            document_active=True,
-        )
-        for p in proto_chunks
-    ]
-
-    # Record before bytes: Postgres keys document_blobs to documents(id).
-    store.create_document(doc, chunks)
+    # Original kept so leadership can download exactly what was approved.
     try:
-        # Original kept so leadership can download exactly what was approved.
-        get_blobs().put(doc.id, data)
-    except Exception:
-        store.delete_document(doc.id)
-        raise
+        docs.publish(doc, data, _chunks_for(doc, proto_chunks), previous)
+    except DuplicateDocument as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This exact file is already in the library as “{exc.existing.title}”.",
+        ) from exc
+    except DocumentMissing as exc:
+        raise HTTPException(status_code=404, detail="The document being replaced no longer exists.") from exc
 
-    # Retired only once the new version is fully stored, so a failed upload
-    # never leaves the policy missing from search.
     if previous is not None:
-        previous.is_active = False
-        previous.updated_at = utcnow()
-        store.update_document(previous)
         audit.log(
             "document_superseded", user=user, target=previous.title,
             detail=f"replaced by v{version}", request=request,
@@ -156,8 +154,8 @@ def update_document(
     request: Request,
     user: UserRecord = Depends(require_leadership),
 ):
-    store = get_repo()
-    doc = store.get_document(document_id)
+    docs = get_docstore()
+    doc = docs.get_document(document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found.")
 
@@ -178,7 +176,10 @@ def update_document(
         changes.append("active" if payload.is_active else "retired")
 
     doc.updated_at = utcnow()
-    store.update_document(doc)
+    try:
+        docs.update(doc)
+    except DocumentMissing as exc:
+        raise HTTPException(status_code=404, detail="Document not found.") from exc
     index.rebuild()
     audit.log(
         "document_updated", user=user, target=doc.title,
@@ -193,14 +194,13 @@ def delete_document(
     request: Request,
     user: UserRecord = Depends(require_leadership),
 ):
-    store = get_repo()
-    doc = store.get_document(document_id)
+    docs = get_docstore()
+    doc = docs.get_document(document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found.")
     title = doc.title
 
-    get_blobs().delete(document_id)
-    store.delete_document(document_id)
+    docs.delete(doc)
     index.rebuild()
     audit.log("document_deleted", user=user, target=title, request=request)
     return {"ok": True}
@@ -212,7 +212,8 @@ def download_document(
     request: Request,
     user: UserRecord = Depends(current_user),
 ):
-    doc = get_repo().get_document(document_id)
+    docs = get_docstore()
+    doc = docs.get_document(document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found.")
     if doc.visibility not in visible_tiers_for_role(user.role):
@@ -220,7 +221,7 @@ def download_document(
         audit.log("document_access_denied", user=user, target=doc.id, request=request)
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    data = get_blobs().get(document_id)
+    data = docs.get_bytes(doc)
     if data is None:
         raise HTTPException(status_code=410, detail="The original file is no longer stored.")
 
@@ -235,8 +236,31 @@ def download_document(
     )
 
 
+def _resync_search_copy(docs: GitHubDocStore) -> None:
+    """Makes the database's passages match GitHub: re-extracts any document
+    the search copy is missing, refreshes title/visibility/active on the rest,
+    and drops passages for documents GitHub no longer has."""
+    store = docs._search_copy()
+    indexed = store.chunk_document_ids()
+    library = docs.list_documents(include_inactive=True)
+    for doc in library:
+        if doc.id in indexed:
+            store.set_chunks_meta(doc.id, doc.title, doc.category, doc.visibility, doc.is_active)
+            continue
+        data = docs.get_bytes(doc)
+        if data is None:
+            continue
+        pages = extract(data, doc.filename, doc.content_type)
+        store.put_chunks(doc.id, _chunks_for(doc, chunk_pages(pages)))
+    for orphan in indexed - {d.id for d in library}:
+        store.delete_chunks(orphan)
+
+
 @router.post("/reindex")
 def reindex(request: Request, user: UserRecord = Depends(require_leadership)):
+    docs = get_docstore()
+    if isinstance(docs, GitHubDocStore):
+        _resync_search_copy(docs)
     count = index.rebuild()
     audit.log("reindex", user=user, detail=f"{count} chunks", request=request)
     return {"ok": True, **index.stats()}

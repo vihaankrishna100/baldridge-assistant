@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     postgres_url: str = ""
     storage_dir: str = "./storage"
 
+    # Documents live in GitHub when these are set: the original files and a
+    # manifest of their metadata, committed through the API. The database then
+    # holds only users, the audit trail, and a rebuildable search copy of the
+    # passages. Unset, documents stay in the database (local dev, tests).
+    github_docs_repo: str = ""          # "owner/name"
+    github_docs_branch: str = "main"
+    github_docs_dir: str = "documents"
+    github_docs_token: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
