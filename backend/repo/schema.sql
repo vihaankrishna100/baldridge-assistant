@@ -151,3 +151,21 @@ CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_i
 CREATE INDEX IF NOT EXISTS messages_stats_idx ON messages (created_at, escalated);
 
 -- ---------------------------------------------------------------- audit
+CREATE TABLE IF NOT EXISTS audit (
+    id         TEXT PRIMARY KEY,
+    at         TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
+    user_id    TEXT,
+    user_email TEXT NOT NULL DEFAULT '',
+    action     TEXT NOT NULL DEFAULT '',
+    target     TEXT NOT NULL DEFAULT '',
+    detail     TEXT NOT NULL DEFAULT '',
+    ip         TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS audit_at_idx ON audit (at DESC);
+CREATE INDEX IF NOT EXISTS audit_action_idx ON audit (action, at DESC);
+
+-- ---------------------------------------------------------------- rate limit
+-- One row per user per hour. bump_query_counter upserts and returns the new
+-- count in a single statement, so two concurrent questions cannot both read
+-- the old value and slip past the cap.
