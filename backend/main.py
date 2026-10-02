@@ -51,6 +51,10 @@ async def lifespan(app: FastAPI):
 
     # Drain queued audit writes before the container goes away.
     audit.flush()
+    if hasattr(store, "search_chunks"):
+        from repo.postgres_repo import close_pool
+
+        close_pool()
 
 
 app = FastAPI(
