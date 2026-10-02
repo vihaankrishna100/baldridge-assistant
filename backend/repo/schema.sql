@@ -39,3 +39,20 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users (lower(email));
 
 -- ---------------------------------------------------------------- invites
+CREATE TABLE IF NOT EXISTS invites (
+    id          TEXT PRIMARY KEY,
+    email       TEXT NOT NULL,
+    role        TEXT NOT NULL DEFAULT 'staff',
+    token_hash  TEXT NOT NULL,
+    created_by  TEXT NOT NULL DEFAULT '',
+    expires_at  TIMESTAMP NOT NULL,
+    accepted_at TIMESTAMP,
+    created_at  TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS invites_token_hash_key ON invites (token_hash);
+CREATE INDEX IF NOT EXISTS invites_email_idx ON invites (lower(email));
+-- list_open_invites filters on both; accepted_at IS NULL is the common case.
+CREATE INDEX IF NOT EXISTS invites_open_idx ON invites (expires_at) WHERE accepted_at IS NULL;
+
+-- ---------------------------------------------------------------- documents
