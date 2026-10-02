@@ -1,22 +1,20 @@
 import type { Metadata } from "next";
-import { Fraunces, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { IBM_Plex_Mono, Montserrat, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { THEME_KEY } from "@/lib/theme";
 
-// Fraunces carries institutional warmth without reading as a tech startup —
-// this is a children's home, not a SaaS product. Low WONK keeps it dignified.
-const display = Fraunces({
-  variable: "--font-display",
+// Montserrat is the Lodge's own typeface on baldridgelodge.org.
+const heading = Montserrat({
+  variable: "--font-heading",
   subsets: ["latin"],
-  // Variable axes require the variable weight range — hence no `weight` array.
-  // SOFT/WONK/opsz are driven from CSS in the .display utilities.
-  axes: ["SOFT", "WONK", "opsz"],
+  weight: ["500", "600", "700"],
 });
 
-// Plex Sans is a workhorse built for dense technical reading at small sizes,
-// which is what a policy answer on a phone at 2am actually is.
-const sans = IBM_Plex_Sans({
-  variable: "--font-sans",
+// Montserrat is wide for long reading, so answers and policy text are set in
+// Source Sans 3, a humanist face that sits comfortably beside it.
+const body = Source_Sans_3({
+  variable: "--font-body",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
 });
@@ -28,11 +26,14 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Bald Ridge Lodge — Internal Assistant",
+  title: "Bald Ridge Lodge — Staff Assistant",
   description:
     "The staff assistant for Bald Ridge Lodge. Answers from our own documents, cites the page, and hands you to a person when it isn't sure.",
   robots: { index: false, follow: false, nocache: true },
 };
+
+// Runs before first paint so a saved light-mode choice never flashes dark.
+const themeScript = `try{var t=localStorage.getItem("${THEME_KEY}");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;
 
 export default function RootLayout({
   children,
@@ -42,9 +43,14 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
+      data-theme="dark"
+      suppressHydrationWarning
+      className={`${heading.variable} ${body.variable} ${mono.variable} h-full antialiased`}
     >
-      <body className="grain flex min-h-full flex-col">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body className="flex min-h-full flex-col">
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

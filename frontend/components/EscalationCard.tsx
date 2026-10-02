@@ -26,7 +26,7 @@ export default function EscalationCard({ data }: { data: Escalation }) {
   const hasContact = Boolean(phone || email);
 
   return (
-    <div className="animate-fade-up rounded-2xl border border-amber/35 bg-amber/[0.06] p-5">
+    <div className="animate-fade-up rounded-xl border border-amber/35 bg-amber/[0.06] p-5">
       <div className="flex items-start gap-3">
         <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-amber/20 text-sm text-amber">
           !
@@ -44,7 +44,7 @@ export default function EscalationCard({ data }: { data: Escalation }) {
               {phone && (
                 <a
                   href={`tel:${phone.replace(/[^\d+]/g, "")}`}
-                  className="inline-flex items-center gap-2 rounded-xl bg-amber px-4 py-2 text-sm font-semibold text-ink transition hover:brightness-110"
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber px-4 py-2 text-sm font-semibold text-ink transition hover:opacity-90"
                 >
                   Call {phone}
                 </a>

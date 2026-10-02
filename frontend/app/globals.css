@@ -1,137 +1,163 @@
 @import "tailwindcss";
 
+/*
+ * Bald Ridge Lodge brand, taken from baldridgelodge.org: deep navy
+ * (#0A2C48), a warm taupe-gold accent (#A59375), and Montserrat.
+ *
+ * Every colour the app uses is a token below, defined once per theme. The
+ * utility names are historical — `cyan` is the primary action colour, `ink`
+ * the page background — so components never name a theme directly.
+ */
 @theme {
-  /* Warm-shifted navy. A pure blue-black reads clinical; these carry a little
-     red so the screen feels like a lamp-lit desk, not a server rack. */
-  --color-ink: #070d18;
-  --color-raised: #0c1424;
-  --color-card: #101b2e;
-  --color-line: #1d2c45;
-  --color-line-soft: #17243a;
+  --color-ink: var(--c-ink);
+  --color-raised: var(--c-raised);
+  --color-card: var(--c-card);
+  --color-line: var(--c-line);
+  --color-line-soft: var(--c-line-soft);
 
-  --color-cyan: #38d9f0;
-  --color-indigo: #6d76f5;
-  --color-amber: #f0a63c;
-  --color-rose: #f2647e;
-  --color-mint: #45d8a0;
+  --color-cyan: var(--c-primary);
+  --color-gold: var(--c-gold);
+  --color-indigo: var(--c-secondary);
+  --color-amber: var(--c-amber);
+  --color-rose: var(--c-rose);
+  --color-mint: var(--c-mint);
 
-  --color-text: #eaf0f9;
-  --color-muted: #93a6c2;
-  --color-faint: #62789c;
+  --color-text: var(--c-text);
+  --color-muted: var(--c-muted);
+  --color-faint: var(--c-faint);
 
-  --font-display: var(--font-display), ui-serif, Georgia, serif;
-  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --color-brand: #0a2c48;
+
+  --font-display: var(--font-heading), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-mono), ui-monospace, monospace;
 }
 
-:root {
+/* Dark is the default: navy, as on the Lodge's own site. */
+:root,
+[data-theme="dark"] {
   color-scheme: dark;
+  --c-ink: #0b1622;
+  --c-raised: #0f1e2d;
+  --c-card: #132538;
+  --c-line: #23394f;
+  --c-line-soft: #1a2d41;
+
+  --c-primary: #cdb98f;
+  --c-gold: #cdb98f;
+  --c-secondary: #8fb0cf;
+  --c-amber: #e3a857;
+  --c-rose: #ec8a80;
+  --c-mint: #6cc8a1;
+
+  --c-text: #eef2f6;
+  --c-muted: #a5b4c4;
+  --c-faint: #74879b;
+
+  --logo: #ffffff;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.5);
+  --selection: rgb(205 185 143 / 0.3);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --c-ink: #f5f4f0;
+  --c-raised: #efede7;
+  --c-card: #ffffff;
+  --c-line: #dfdbd2;
+  --c-line-soft: #ebe8e1;
+
+  --c-primary: #0a2c48;
+  --c-gold: #8a7550;
+  --c-secondary: #36648c;
+  --c-amber: #985f0d;
+  --c-rose: #b03a32;
+  --c-mint: #1f7553;
+
+  --c-text: #13222f;
+  --c-muted: #4d5d6c;
+  --c-faint: #76838f;
+
+  --logo: #0a2c48;
+  --shadow: 0 1px 2px rgb(19 34 47 / 0.06), 0 8px 24px -14px rgb(19 34 47 / 0.18);
+  --selection: rgb(10 44 72 / 0.15);
 }
 
 html {
-  /* The page background lives on <html> so body's ::before grain can sit at a
-     negative z-index and still be visible. */
-  background: #070d18;
-  /* The hero's decorative rings deliberately bleed past the card. `clip`
-     rather than `hidden` — hidden would make <html> a scroll container and
-     break the sticky headers. */
+  background: var(--c-ink);
   overflow-x: clip;
 }
 
 body {
-  background: transparent;
-  color: #eaf0f9;
+  background: var(--c-ink);
+  color: var(--c-text);
   font-family: var(--font-sans);
+  font-size: 15px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Layered atmosphere: two pools of light plus a faint ledger rule that reads
-   as ruled paper rather than a tech grid. */
-.atmosphere {
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
-  background-image:
-    radial-gradient(760px 520px at 8% -10%, rgba(109, 118, 245, 0.16), transparent 62%),
-    radial-gradient(680px 460px at 96% 4%, rgba(56, 217, 240, 0.1), transparent 60%),
-    radial-gradient(900px 600px at 50% 108%, rgba(240, 166, 60, 0.055), transparent 66%);
-}
-
-.ledger {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  opacity: 0.5;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0px,
-    transparent 31px,
-    rgba(147, 166, 194, 0.045) 31px,
-    rgba(147, 166, 194, 0.045) 32px
-  );
-  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, #000 20%, transparent 78%);
-}
-
-/* Film grain, inline so nothing is fetched. Warms up the flat panels.
-   Sits at the bottom of the stack: grain (-3) < atmosphere (-2) < ledger (-1)
-   < content (auto). Bumping content z-index instead would clobber the
-   position: fixed on the two layers above. */
-.grain::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -3;
-  pointer-events: none;
-  opacity: 0.16;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
 ::selection {
-  background: rgba(56, 217, 240, 0.3);
-  color: #fff;
+  background: var(--selection);
+}
+
+:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
 }
 
 *::-webkit-scrollbar {
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: #1d2c45;
+  background: var(--c-line);
   border-radius: 999px;
-  border: 3px solid #070d18;
-}
-*::-webkit-scrollbar-thumb:hover {
-  background: #2c4066;
+  border: 3px solid var(--c-ink);
 }
 
 /* ---------------------------------------------------------- typography */
 
-.display {
+.display,
+.display-loose {
   font-family: var(--font-display);
-  font-variation-settings: "SOFT" 24, "WONK" 0, "opsz" 40;
-  letter-spacing: -0.022em;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.015em;
 }
 
 .display-loose {
-  font-family: var(--font-display);
-  font-variation-settings: "SOFT" 40, "WONK" 1, "opsz" 96;
-  letter-spacing: -0.03em;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
+/* Small section label, in the brand gold. */
 .eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.2em;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #62789c;
+  color: var(--c-gold);
+}
+
+/* The Lodge's logo artwork is white on transparent. Drawing it as a mask lets
+   one file take the right colour in either theme. */
+.brand-logo {
+  display: inline-block;
+  background-color: var(--logo);
+  mask-repeat: no-repeat;
+  mask-position: left center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: left center;
+  -webkit-mask-size: contain;
+}
+
+.surface {
+  box-shadow: var(--shadow);
 }
 
 /* ---------------------------------------------------------- motion */
@@ -139,7 +165,7 @@ body {
 @keyframes fade-up {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -148,48 +174,28 @@ body {
 }
 
 .animate-fade-up {
-  animation: fade-up 0.5s cubic-bezier(0.16, 0.84, 0.44, 1) both;
+  animation: fade-up 0.35s ease-out both;
 }
-
-/* Staggered page-load reveal — one orchestrated moment beats scattered ones. */
-.reveal > * {
-  animation: fade-up 0.6s cubic-bezier(0.16, 0.84, 0.44, 1) both;
-}
-.reveal > *:nth-child(1) { animation-delay: 0.04s; }
-.reveal > *:nth-child(2) { animation-delay: 0.12s; }
-.reveal > *:nth-child(3) { animation-delay: 0.2s; }
-.reveal > *:nth-child(4) { animation-delay: 0.28s; }
-.reveal > *:nth-child(5) { animation-delay: 0.36s; }
-.reveal > *:nth-child(6) { animation-delay: 0.44s; }
 
 @keyframes blink {
-  0%, 100% { opacity: 0.15; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .caret::after {
   content: "";
   display: inline-block;
-  width: 7px;
+  width: 2px;
   height: 1.05em;
   margin-left: 3px;
   vertical-align: text-bottom;
-  background: #38d9f0;
+  background: var(--c-primary);
   animation: blink 1.05s steps(2, start) infinite;
-}
-
-@keyframes trace {
-  to { stroke-dashoffset: 0; }
-}
-
-@keyframes lamp {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 0.95; }
-}
-
-@keyframes rise {
-  0% { opacity: 0; transform: translateY(7px) scale(0.94); }
-  100% { opacity: 1; transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -200,19 +206,4 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-/* ---------------------------------------------------------- surfaces */
-
-/* A hairline of light along the top edge — the way a lamp catches a page. */
-.lit {
-  position: relative;
-}
-.lit::before {
-  content: "";
-  position: absolute;
-  inset-inline: 12%;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(56, 217, 240, 0.42), transparent);
 }

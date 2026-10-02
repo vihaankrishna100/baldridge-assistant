@@ -31,7 +31,7 @@ function renderInline(text: string, sources: SourceRef[], onCite?: (n: number) =
       out.push(
         <code
           key={key++}
-          className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-[0.85em] text-cyan"
+          className="rounded bg-raised px-1.5 py-0.5 font-mono text-[0.85em] text-cyan"
         >
           {segment.slice(1, -1)}
         </code>,
