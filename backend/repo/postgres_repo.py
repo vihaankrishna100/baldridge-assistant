@@ -130,3 +130,59 @@ def _all(cls: type[T], rows: list[dict[str, Any]]) -> list[T]:
 
 
 class PostgresRepo:
+    # ---------------------------------------------------------------- users
+
+    def get_user(self, user_id: str) -> UserRecord | None:
+        with get_pool().connection() as c:
+            return _hydrate(UserRecord, c.execute(
+                "SELECT * FROM users WHERE id = %s", (user_id,)).fetchone())
+
+    def get_user_by_email(self, email: str) -> UserRecord | None:
+        with get_pool().connection() as c:
+            return _hydrate(UserRecord, c.execute(
+                "SELECT * FROM users WHERE lower(email) = lower(%s)", (email,)).fetchone())
+
+    def list_users(self) -> list[UserRecord]:
+        with get_pool().connection() as c:
+            return _all(UserRecord, c.execute(
+                "SELECT * FROM users ORDER BY created_at").fetchall())
+
+    def create_user(self, user: UserRecord) -> UserRecord:
+        user.email = user.email.lower()
+        try:
+            with get_pool().connection() as c:
+                c.execute(
+                    """INSERT INTO users (id, email, full_name, password_hash, role,
+                           totp_secret, totp_confirmed, is_active, must_change_password,
+                           failed_logins, locked_until, last_login_at, created_at, token_epoch)
+                       VALUES (%(id)s, %(email)s, %(full_name)s, %(password_hash)s, %(role)s,
+                           %(totp_secret)s, %(totp_confirmed)s, %(is_active)s,
+                           %(must_change_password)s, %(failed_logins)s, %(locked_until)s,
+                           %(last_login_at)s, %(created_at)s, %(token_epoch)s)""",
+                    user.__dict__,
+                )
+        except psycopg.errors.UniqueViolation as exc:
+            raise EmailTaken(user.email) from exc
+        return user
+
+    def save_user(self, user: UserRecord) -> None:
+        with get_pool().connection() as c:
+            c.execute(
+                """UPDATE users SET email=%(email)s, full_name=%(full_name)s,
+                       password_hash=%(password_hash)s, role=%(role)s,
+                       totp_secret=%(totp_secret)s, totp_confirmed=%(totp_confirmed)s,
+                       is_active=%(is_active)s, must_change_password=%(must_change_password)s,
+                       failed_logins=%(failed_logins)s, locked_until=%(locked_until)s,
+                       last_login_at=%(last_login_at)s, token_epoch=%(token_epoch)s
+                   WHERE id=%(id)s""",
+                user.__dict__,
+            )
+
+    def delete_user(self, user_id: str) -> None:
+        with get_pool().connection() as c:
+            c.execute("DELETE FROM users WHERE id = %s", (user_id,))
+
+    def count_active_users(self) -> int:
+        with get_pool().connection() as c:
+            return c.execute("SELECT count(*) AS n FROM users WHERE is_active").fetchone()["n"]
+
