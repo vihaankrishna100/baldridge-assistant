@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
 
     database_url: str = "sqlite:///./data/baldridge.db"
+    # Neon. Kept separate from database_url so the SQLite file stays readable
+    # during a migration, and so a stray DATABASE_URL cannot silently point
+    # the SQLAlchemy layer at Postgres (it would reach for psycopg2).
+    postgres_url: str = ""
     storage_dir: str = "./storage"
 
     @property
