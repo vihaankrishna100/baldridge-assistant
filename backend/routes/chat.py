@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 import audit
 import llm
 from config import settings
-from deps import current_user, enforce_rate_limit
+from deps import current_user, enforce_rate_limit, history_owner
 from models import visible_tiers_for_role
 from rag.index import Hit, index
 from repo import get_repo
@@ -143,15 +143,16 @@ def ask(
     store = get_repo()
     enforce_rate_limit(user)
     question = payload.question.strip()
+    owner = history_owner(user, request)
 
     conversation = None
     if payload.conversation_id:
         conversation = store.get_conversation(payload.conversation_id)
-        if conversation is None or conversation.user_id != user.id:
+        if conversation is None or conversation.user_id != owner:
             raise HTTPException(status_code=404, detail="Conversation not found.")
     if conversation is None:
         conversation = store.create_conversation(
-            ConversationRecord(user_id=user.id, title=question[:120])
+            ConversationRecord(user_id=owner, title=question[:120])
         )
 
     store.add_message(
@@ -267,18 +268,20 @@ def ask(
 
 
 @router.get("/conversations")
-def list_conversations(user: UserRecord = Depends(current_user)):
-    rows = get_repo().list_conversations(user.id, limit=50)
+def list_conversations(request: Request, user: UserRecord = Depends(current_user)):
+    rows = get_repo().list_conversations(history_owner(user, request), limit=50)
     return [
         {"id": c.id, "title": c.title, "updated_at": c.updated_at.isoformat()} for c in rows
     ]
 
 
 @router.get("/conversations/{conversation_id}")
-def get_conversation(conversation_id: str, user: UserRecord = Depends(current_user)):
+def get_conversation(
+    conversation_id: str, request: Request, user: UserRecord = Depends(current_user)
+):
     store = get_repo()
     conversation = store.get_conversation(conversation_id)
-    if conversation is None or conversation.user_id != user.id:
+    if conversation is None or conversation.user_id != history_owner(user, request):
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return {
         "id": conversation.id,
@@ -306,7 +309,7 @@ def delete_conversation(
 ):
     store = get_repo()
     conversation = store.get_conversation(conversation_id)
-    if conversation is None or conversation.user_id != user.id:
+    if conversation is None or conversation.user_id != history_owner(user, request):
         raise HTTPException(status_code=404, detail="Conversation not found.")
     store.delete_conversation(conversation_id)
     audit.log("conversation_deleted", user=user, target=conversation_id, request=request)

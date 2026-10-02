@@ -6,7 +6,11 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from config import settings
-from models import ROLE_ADMIN, ROLE_LEADERSHIP
+import hashlib
+import re
+import secrets
+
+from models import ROLE_ADMIN, ROLE_LEADERSHIP, ROLE_TEAM
 from repo import get_repo
 from repo.base import UserRecord
 from security import decode_token
@@ -42,6 +46,7 @@ def current_user(
         settings.require_2fa
         and not user.totp_confirmed
         and not settings.is_2fa_exempt(user.email)
+        and user.role != ROLE_TEAM
     ):
         raise HTTPException(status_code=403, detail="Two-factor setup is required")
     return user
@@ -61,17 +66,34 @@ def require_admin(user: UserRecord = Depends(current_user)) -> UserRecord:
 
 def enforce_rate_limit(user: UserRecord) -> None:
     bucket = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
-    allowed = get_repo().bump_query_counter(
-        user.id, bucket, settings.max_queries_per_hour
+    limit = (
+        settings.team_queries_per_hour if user.role == ROLE_TEAM else settings.max_queries_per_hour
     )
+    allowed = get_repo().bump_query_counter(user.id, bucket, limit)
     if not allowed:
         raise HTTPException(
             status_code=429,
-            detail=(
-                f"You've reached the limit of {settings.max_queries_per_hour} "
-                "questions this hour. Try again shortly."
-            ),
+            detail=f"You've reached the limit of {limit} questions this hour. Try again shortly.",
         )
+
+
+_DEVICE_ID = re.compile(r"^[A-Za-z0-9-]{16,64}$")
+
+
+def history_owner(user: UserRecord, request: Request) -> str:
+    """Whose chat history a request reads and writes.
+
+    A personal account owns its own. The team login is shared, so its history
+    is scoped to the browser that sent X-Device-Id: coworkers on other devices
+    never see each other's questions. Without a valid id there is no device to
+    scope to, and the request gets a history no one else can address.
+    """
+    if user.role != ROLE_TEAM:
+        return user.id
+    device = request.headers.get("X-Device-Id", "")
+    if not _DEVICE_ID.match(device):
+        device = "anonymous-" + secrets.token_hex(16)
+    return hashlib.sha256(f"{user.id}:{device}".encode()).hexdigest()[:32]
 
 
 def get_request(request: Request) -> Request:

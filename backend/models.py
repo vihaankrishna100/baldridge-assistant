@@ -36,6 +36,10 @@ ROLE_STAFF = "staff"
 ROLE_LEADERSHIP = "leadership"
 ROLE_ADMIN = "admin"
 ROLES = (ROLE_STAFF, ROLE_LEADERSHIP, ROLE_ADMIN)
+# One shared sign-in for all staff, created by an admin. Staff-level access,
+# password only, history kept per device. Deliberately not in ROLES, so no
+# invite or role change can turn a person's account into it.
+ROLE_TEAM = "team"
 
 
 def visible_tiers_for_role(role: str) -> list[str]:

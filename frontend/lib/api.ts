@@ -16,6 +16,30 @@ export function setToken(token: string | null) {
   else window.sessionStorage.removeItem(TOKEN_KEY);
 }
 
+// A random id for this browser. The shared team login keeps chat history per
+// device with it, so coworkers on other machines never see each other's
+// questions. Personal accounts ignore it.
+const DEVICE_KEY = "bra.device";
+
+function deviceId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    let id = window.localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      window.localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
+}
+
+function deviceHeader(): Record<string, string> {
+  const id = deviceId();
+  return id ? { "X-Device-Id": id } : {};
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -35,6 +59,7 @@ export async function api<T = unknown>(path: string, options: Options = {}): Pro
     headers: {
       ...(raw ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...deviceHeader(),
       ...(headers as Record<string, string>),
     },
     body: raw ? (body as BodyInit) : body !== undefined ? JSON.stringify(body) : undefined,
@@ -94,6 +119,7 @@ export async function ask(
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...deviceHeader(),
     },
     body: JSON.stringify({ question, conversation_id: conversationId }),
     signal,

@@ -8,7 +8,7 @@ export type User = {
   id: string;
   email: string;
   full_name: string;
-  role: "staff" | "leadership" | "admin";
+  role: "staff" | "leadership" | "admin" | "team";
   totp_confirmed: boolean;
   is_active: boolean;
 };
@@ -98,7 +98,8 @@ export function useRequireAuth(minRole?: "leadership" | "admin") {
       return;
     }
     if (minRole === "admin" && user.role !== "admin") router.replace("/ask");
-    if (minRole === "leadership" && user.role === "staff") router.replace("/ask");
+    if (minRole === "leadership" && user.role !== "leadership" && user.role !== "admin")
+      router.replace("/ask");
   }, [user, loading, minRole, router]);
 
   return { user, loading };

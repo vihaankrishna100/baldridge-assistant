@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 import audit
 from config import settings
 from deps import current_user
-from models import ROLES
+from models import ROLE_TEAM, ROLES
 from repo import get_repo
 from repo.base import EmailTaken, InviteRecord, UserRecord, utcnow
 from schemas import (
@@ -97,6 +97,9 @@ def login(payload: LoginRequest, request: Request):
             "login_2fa_bypassed", user=user,
             detail="account is on TWOFA_EXEMPT_EMAILS", request=request,
         )
+        return _finalize_login(user, request)
+    # A shared login cannot have one person's authenticator app behind it.
+    if user.role == ROLE_TEAM:
         return _finalize_login(user, request)
 
     if settings.require_2fa:
@@ -230,6 +233,12 @@ def change_password(
     request: Request,
     user: UserRecord = Depends(current_user),
 ):
+    if user.role == ROLE_TEAM:
+        # Changing it here would sign every coworker out with a password they
+        # were never given.
+        raise HTTPException(
+            status_code=403, detail="The team password is managed by an administrator."
+        )
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Current password is incorrect.")
     problems = password_problems(payload.new_password)

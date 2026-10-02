@@ -52,6 +52,11 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TeamAccountIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=256)
+
+
 class InviteCreate(BaseModel):
     email: EmailStr
     role: str = "staff"

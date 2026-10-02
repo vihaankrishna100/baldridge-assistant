@@ -258,8 +258,14 @@ export default function AdminPage() {
 
       {tab === "people" && (
         <div className="space-y-6">
+          <TeamLogin team={users.find((u) => u.role === "team")} onChange={load} />
+
           <section className="rounded-2xl border border-line bg-card/70 p-6">
-            <h2 className="mb-4 text-sm font-semibold text-text">Invite a team member</h2>
+            <h2 className="text-sm font-semibold text-text">Invite a team member</h2>
+            <p className="mt-1 mb-4 text-sm text-muted">
+              Their own account, with their own history and two-factor. Use this for leadership,
+              administrators, and anyone who should be able to see leadership-only documents.
+            </p>
             <form onSubmit={createInvite} className="flex flex-wrap gap-2.5">
               <input
                 type="email"
@@ -332,7 +338,7 @@ export default function AdminPage() {
           <section className="rounded-2xl border border-line bg-card/70 p-6">
             <h2 className="mb-4 text-sm font-semibold text-text">Accounts</h2>
             <ul className="space-y-2">
-              {users.map((u) => (
+              {users.filter((u) => u.role !== "team").map((u) => (
                 <li
                   key={u.id}
                   className={`flex flex-wrap items-center gap-3 rounded-xl border border-line px-4 py-3 ${
@@ -453,6 +459,114 @@ function Stat({
       </p>
       {hint && <p className="mt-0.5 text-[11px] text-faint">{hint}</p>}
     </div>
+  );
+}
+
+function TeamLogin({ team, onChange }: { team?: User; onChange: () => Promise<void> }) {
+  const [email, setEmail] = useState(team?.email ?? "");
+  const [password, setPassword] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const active = Boolean(team?.is_active);
+
+  useEffect(() => {
+    setEmail(team?.email ?? "");
+  }, [team?.email]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api("/admin/team", { method: "PUT", body: { email, password } });
+      setPassword("");
+      setNotice(
+        team
+          ? "Saved. Everyone on the team login has been signed out — share the new details with staff."
+          : "Team login created. Share the email and password with staff.",
+      );
+      await onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the team login.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const turnOff = async () => {
+    if (!confirm("Turn off the team login? Everyone using it is signed out immediately.")) return;
+    setError("");
+    setNotice("");
+    try {
+      await api("/admin/team", { method: "DELETE" });
+      setNotice("Team login turned off.");
+      await onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not turn off the team login.");
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-line bg-card/70 p-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="text-sm font-semibold text-text">Team login</h2>
+        <span className={`text-xs ${active ? "text-mint" : "text-faint"}`}>
+          {active ? "On" : team ? "Off" : "Not set up"}
+        </span>
+      </div>
+      <p className="mt-1 mb-4 text-sm text-muted">
+        One shared sign-in for all staff, so nobody has to make an account. It can ask questions
+        about staff documents only — no leadership documents, no uploads — and each device keeps
+        its own chat history. It signs in with a password alone, so change it whenever someone
+        leaves; saving a new password signs everyone out.
+      </p>
+
+      <form onSubmit={save} className="flex flex-wrap gap-2.5">
+        <input
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="staff@baldridgelodge.org"
+          aria-label="Team login email"
+          className="min-w-56 flex-1 rounded-xl border border-line bg-ink/60 px-3.5 py-2.5 text-sm text-text outline-none focus:border-cyan/50"
+        />
+        <input
+          type="text"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={team ? "New password" : "Password"}
+          aria-label="Team login password"
+          autoComplete="new-password"
+          className="min-w-48 flex-1 rounded-xl border border-line bg-ink/60 px-3.5 py-2.5 font-mono text-sm text-text outline-none focus:border-cyan/50"
+        />
+        <button
+          disabled={busy}
+          className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition enabled:hover:brightness-110 disabled:opacity-40"
+        >
+          {busy ? "Saving…" : !team ? "Create team login" : active ? "Change" : "Turn on"}
+        </button>
+        {active && (
+          <button
+            type="button"
+            onClick={() => void turnOff()}
+            className="rounded-xl border border-line px-4 py-2 text-sm text-muted hover:text-rose"
+          >
+            Turn off
+          </button>
+        )}
+      </form>
+      <p className="mt-2 text-[11px] text-faint">
+        At least 12 characters, with a letter and a number. The email doesn’t need to be a real
+        inbox — it’s just what staff type to sign in.
+      </p>
+
+      {notice && <p className="mt-3 text-sm text-mint">{notice}</p>}
+      {error && <p className="mt-3 text-sm text-rose">{error}</p>}
+    </section>
   );
 }
 

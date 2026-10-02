@@ -7,12 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 import audit
 from config import settings
 from deps import require_admin
-from models import ROLES
+from models import ROLE_TEAM, ROLES
 from rag.index import index
 from repo import get_repo
-from repo.base import InviteRecord, UserRecord, utcnow
-from schemas import AuditOut, InviteCreate, InviteOut, UserOut
-from security import new_invite_token
+from repo.base import EmailTaken, InviteRecord, UserRecord, utcnow
+from schemas import AuditOut, InviteCreate, InviteOut, TeamAccountIn, UserOut
+from security import hash_password, new_invite_token, password_problems
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -147,6 +147,73 @@ def reset_2fa(
     return {"ok": True, "message": f"{target.email} will re-enrol on next sign-in."}
 
 
+def _team_account() -> UserRecord | None:
+    return next((u for u in get_repo().list_users() if u.role == ROLE_TEAM), None)
+
+
+@router.get("/team")
+def get_team(_: UserRecord = Depends(require_admin)):
+    team = _team_account()
+    return UserOut.model_validate(team) if team else None
+
+
+@router.put("/team")
+def set_team(
+    payload: TeamAccountIn,
+    request: Request,
+    admin: UserRecord = Depends(require_admin),
+):
+    """Creates the shared staff login, or changes its email/password.
+
+    Any change signs everyone out, so a password that was shared too widely
+    can be retired immediately."""
+    store = get_repo()
+    problems = password_problems(payload.password)
+    if problems:
+        raise HTTPException(status_code=400, detail="Password " + ", ".join(problems) + ".")
+    email = payload.email.strip().lower()
+    team = _team_account()
+    clash = store.get_user_by_email(email)
+    if clash is not None and (team is None or clash.id != team.id):
+        raise HTTPException(status_code=409, detail="That email already belongs to an account.")
+
+    if team is None:
+        try:
+            team = store.create_user(
+                UserRecord(
+                    email=email,
+                    full_name="Team login",
+                    password_hash=hash_password(payload.password),
+                    role=ROLE_TEAM,
+                )
+            )
+        except EmailTaken as exc:
+            raise HTTPException(status_code=409, detail="That email already belongs to an account.") from exc
+        audit.log("team_login_created", user=admin, target=email, request=request)
+    else:
+        team.email = email
+        team.password_hash = hash_password(payload.password)
+        team.is_active = True
+        team.failed_logins = 0
+        team.locked_until = None
+        team.token_epoch += 1
+        store.save_user(team)
+        audit.log("team_login_updated", user=admin, target=email, request=request)
+    return UserOut.model_validate(team)
+
+
+@router.delete("/team")
+def disable_team(request: Request, admin: UserRecord = Depends(require_admin)):
+    team = _team_account()
+    if team is None:
+        return {"ok": True}
+    team.is_active = False
+    team.token_epoch += 1
+    get_repo().save_user(team)
+    audit.log("team_login_disabled", user=admin, target=team.email, request=request)
+    return {"ok": True}
+
+
 @router.post("/users/{user_id}/role")
 def set_role(
     user_id: str,
@@ -161,6 +228,8 @@ def set_role(
     target = store.get_user(user_id)
     if target is None:
         raise HTTPException(status_code=404, detail="User not found.")
+    if target.role == ROLE_TEAM:
+        raise HTTPException(status_code=400, detail="The team login is always staff-level.")
     if target.id == admin.id and role != "admin":
         raise HTTPException(status_code=400, detail="You cannot remove your own admin access.")
 

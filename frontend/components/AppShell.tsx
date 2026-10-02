@@ -16,6 +16,7 @@ const ROLE_LABEL: Record<string, string> = {
   staff: "Staff",
   leadership: "Leadership",
   admin: "Administrator",
+  team: "Team login",
 };
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
