@@ -186,3 +186,53 @@ class PostgresRepo:
         with get_pool().connection() as c:
             return c.execute("SELECT count(*) AS n FROM users WHERE is_active").fetchone()["n"]
 
+    # -------------------------------------------------------------- invites
+
+    def get_invite_by_token_hash(self, token_hash: str) -> InviteRecord | None:
+        with get_pool().connection() as c:
+            return _hydrate(InviteRecord, c.execute(
+                "SELECT * FROM invites WHERE token_hash = %s", (token_hash,)).fetchone())
+
+    def get_invite(self, invite_id: str) -> InviteRecord | None:
+        with get_pool().connection() as c:
+            return _hydrate(InviteRecord, c.execute(
+                "SELECT * FROM invites WHERE id = %s", (invite_id,)).fetchone())
+
+    def list_open_invites(self) -> list[InviteRecord]:
+        with get_pool().connection() as c:
+            return _all(InviteRecord, c.execute(
+                """SELECT * FROM invites
+                   WHERE accepted_at IS NULL AND expires_at > %s
+                   ORDER BY created_at DESC""",
+                (utcnow(),)).fetchall())
+
+    def create_invite(self, invite: InviteRecord) -> InviteRecord:
+        invite.email = invite.email.lower()
+        with get_pool().connection() as c:
+            c.execute(
+                """INSERT INTO invites (id, email, role, token_hash, created_by,
+                       expires_at, accepted_at, created_at)
+                   VALUES (%(id)s, %(email)s, %(role)s, %(token_hash)s, %(created_by)s,
+                       %(expires_at)s, %(accepted_at)s, %(created_at)s)""",
+                invite.__dict__,
+            )
+        return invite
+
+    def save_invite(self, invite: InviteRecord) -> None:
+        with get_pool().connection() as c:
+            c.execute(
+                """UPDATE invites SET email=%(email)s, role=%(role)s,
+                       token_hash=%(token_hash)s, expires_at=%(expires_at)s,
+                       accepted_at=%(accepted_at)s
+                   WHERE id=%(id)s""",
+                invite.__dict__,
+            )
+
+    def delete_invite(self, invite_id: str) -> None:
+        with get_pool().connection() as c:
+            c.execute("DELETE FROM invites WHERE id = %s", (invite_id,))
+
+    def delete_invites_for_email(self, email: str) -> None:
+        with get_pool().connection() as c:
+            c.execute("DELETE FROM invites WHERE lower(email) = lower(%s)", (email,))
+
