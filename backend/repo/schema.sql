@@ -17,3 +17,25 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- ---------------------------------------------------------------- users
+CREATE TABLE IF NOT EXISTS users (
+    id                   TEXT PRIMARY KEY,
+    email                TEXT NOT NULL,
+    full_name            TEXT NOT NULL DEFAULT '',
+    password_hash        TEXT NOT NULL DEFAULT '',
+    role                 TEXT NOT NULL DEFAULT 'staff',
+    totp_secret          TEXT,
+    totp_confirmed       BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+    failed_logins        INTEGER NOT NULL DEFAULT 0,
+    locked_until         TIMESTAMP,
+    last_login_at        TIMESTAMP,
+    created_at           TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
+    token_epoch          INTEGER NOT NULL DEFAULT 1
+);
+
+-- Case-insensitive: the app lowercases on the way in, this stops a stray
+-- mixed-case insert from creating a second account for the same person.
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users (lower(email));
+
+-- ---------------------------------------------------------------- invites
