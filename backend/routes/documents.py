@@ -73,7 +73,11 @@ async def upload_document(
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(data) > max_bytes:
         raise HTTPException(
-            status_code=413, detail=f"File is larger than the {settings.max_upload_mb} MB limit."
+            status_code=413,
+            detail=(
+                f"Files must be under {settings.max_upload_mb:g} MB. Compress the PDF "
+                "or split it into parts, then upload again."
+            ),
         )
     if not data:
         raise HTTPException(status_code=400, detail="That file is empty.")

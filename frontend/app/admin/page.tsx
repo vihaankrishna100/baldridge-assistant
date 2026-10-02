@@ -14,6 +14,7 @@ type Stats = {
   answer_rate: number;
   index: { chunks: number; documents: number; semantic_enabled: boolean };
   coverage_gaps: { question: string; count: number }[];
+  storage: { used_bytes: number; limit_bytes: number } | null;
 };
 
 type Settings = {
@@ -27,6 +28,7 @@ type Settings = {
   effort: string;
   retrieval_min_score: number;
   max_queries_per_hour: number;
+  storage: string;
 };
 
 type Invite = { id: string; email: string; role: string; expires_at: string };
@@ -183,6 +185,14 @@ export default function AdminPage() {
               tone="amber"
             />
           </div>
+
+          {stats.storage && (
+            <StorageMeter
+              used={stats.storage.used_bytes}
+              limit={stats.storage.limit_bytes}
+              filesInGitHub={settings?.storage === "GitHubDocStore"}
+            />
+          )}
 
           <section className="rounded-2xl border border-line bg-card/70 p-6">
             <h2 className="text-sm font-semibold text-text">Where the documents fall short</h2>
@@ -443,6 +453,49 @@ function Stat({
       </p>
       {hint && <p className="mt-0.5 text-[11px] text-faint">{hint}</p>}
     </div>
+  );
+}
+
+function StorageMeter({
+  used,
+  limit,
+  filesInGitHub,
+}: {
+  used: number;
+  limit: number;
+  filesInGitHub: boolean;
+}) {
+  const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  const pct = Math.min(100, Math.round((used / limit) * 100));
+  const tone = pct >= 90 ? "bg-rose" : pct >= 75 ? "bg-amber" : "bg-cyan";
+  return (
+    <section className="rounded-2xl border border-line bg-card/70 p-6">
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="text-sm font-semibold text-text">Database storage</h2>
+        <p className="text-sm text-muted">
+          {mb(used)} of {mb(limit)} · {pct}%
+        </p>
+      </div>
+      <div
+        className="mt-3 h-2 overflow-hidden rounded-full bg-ink/60"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div className={`h-full ${tone}`} style={{ width: `${Math.max(pct, 1)}%` }} />
+      </div>
+      <p className="mt-3 text-[12px] text-faint">
+        {filesInGitHub
+          ? "Original files are stored in GitHub. This counts accounts, history, and the searchable text of every document."
+          : "This counts accounts, history, the searchable text of every document, and the original files."}{" "}
+        {pct >= 90
+          ? "Nearly full — delete retired versions you no longer need, or move to a paid plan."
+          : pct >= 75
+            ? "Getting full — consider deleting retired versions you no longer need."
+            : "Plenty of room."}
+      </p>
+    </section>
   );
 }
 

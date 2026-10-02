@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { UploadIcon } from "@/components/Icons";
-import { API_BASE, api, getToken } from "@/lib/api";
+import { API_BASE, ApiError, api, getToken } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 
 type Doc = {
@@ -19,6 +19,12 @@ type Doc = {
   pii_flags: string;
   updated_at: string;
 };
+
+// Vercel rejects request bodies over 4.5 MB before the API sees them; a little
+// headroom covers the form fields sent alongside the file.
+const MAX_UPLOAD_BYTES = 4.4 * 1000 * 1000;
+const TOO_LARGE =
+  "Files must be under 4.5 MB. Compress the PDF or split it into parts, then upload again.";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -58,6 +64,10 @@ export default function DocumentsPage() {
   const upload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(`“${file.name}” is ${formatSize(file.size)}. ${TOO_LARGE}`);
+      return;
+    }
     setBusy(true);
     setError("");
     setNotice("");
@@ -81,7 +91,8 @@ export default function DocumentsPage() {
       if (fileRef.current) fileRef.current.value = "";
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      if (err instanceof ApiError && err.status === 413) setError(TOO_LARGE);
+      else setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setBusy(false);
     }
@@ -145,16 +156,33 @@ export default function DocumentsPage() {
           <div className="grid gap-3.5 sm:grid-cols-2">
             <label className="block sm:col-span-2">
               <span className="mb-1.5 block text-xs font-medium text-muted">
-                File — PDF, Word, Markdown, CSV, or text
+                File — PDF, Word, Markdown, CSV, or text · under 4.5 MB
               </span>
               <input
                 ref={fileRef}
                 type="file"
                 required
                 accept=".pdf,.docx,.txt,.md,.markdown,.csv"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  const picked = e.target.files?.[0] ?? null;
+                  if (picked && picked.size > MAX_UPLOAD_BYTES) {
+                    setError(`“${picked.name}” is ${formatSize(picked.size)}. ${TOO_LARGE}`);
+                    setFile(null);
+                    e.target.value = "";
+                    return;
+                  }
+                  setError("");
+                  setFile(picked);
+                }}
                 className="w-full rounded-xl border border-line bg-ink/60 px-3.5 py-2.5 text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-cyan/15 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-cyan"
               />
+              <span className="mt-1.5 block text-[11px] leading-relaxed text-faint">
+                File too large? Shrink it first: in Adobe Acrobat, File → Save as Other → Reduced
+                Size PDF; on a Mac, open it in Preview → File → Export → Quartz Filter “Reduce File
+                Size”; from Word, File → Save As → PDF with “Minimum size”. Or split a long document
+                into parts. Avoid free online compressors for internal documents — they upload the
+                file to someone else’s server.
+              </span>
             </label>
 
             <label className="block">

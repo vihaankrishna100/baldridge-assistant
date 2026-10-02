@@ -202,6 +202,14 @@ def stats(_: UserRecord = Depends(require_admin)):
         "escalated_30d": escalated,
         "answer_rate": round(answered / total, 3) if total else 0.0,
         "index": index.stats(),
+        "storage": (
+            {
+                "used_bytes": store.storage_bytes(),
+                "limit_bytes": settings.storage_limit_mb * 1024 * 1024,
+            }
+            if hasattr(store, "storage_bytes")
+            else None
+        ),
         # The most valuable admin view: what staff keep asking that the
         # document library does not yet cover.
         "coverage_gaps": [
@@ -227,6 +235,7 @@ def read_settings(_: UserRecord = Depends(require_admin)):
         "retrieval_top_k": settings.retrieval_top_k,
         "retrieval_min_score": settings.retrieval_min_score,
         "max_queries_per_hour": settings.max_queries_per_hour,
+        "max_upload_mb": settings.max_upload_mb,
         "storage": type(get_docstore()).__name__,
         "repo": type(get_repo()).__name__,
     }

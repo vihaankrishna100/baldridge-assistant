@@ -354,6 +354,10 @@ class PostgresRepo:
         with get_pool().connection() as c:
             c.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
 
+    def storage_bytes(self) -> int:
+        with get_pool().connection() as c:
+            return c.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"]
+
     def chunk_document_ids(self) -> set[str]:
         with get_pool().connection() as c:
             rows = c.execute("SELECT DISTINCT document_id FROM chunks").fetchall()

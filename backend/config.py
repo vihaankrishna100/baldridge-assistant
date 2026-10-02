@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     # account whose password is the only thing protecting the whole library.
     twofa_exempt_emails: str = ""
     max_queries_per_hour: int = 60
-    max_upload_mb: int = 25
+    # Vercel rejects request bodies over 4.5 MB before they reach the app.
+    max_upload_mb: float = 4.5
+    # Neon's free plan; the admin page warns as the database approaches it.
+    storage_limit_mb: int = 512
     cors_origins: str = "http://localhost:3000"
 
     database_url: str = "sqlite:///./data/baldridge.db"
