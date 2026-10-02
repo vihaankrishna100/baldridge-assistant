@@ -278,6 +278,10 @@ class HybridIndex:
         # signing in does not need the corpus, and rebuilding 645 chunks in
         # front of it added many seconds to the first login of the day.
         self._first_build = threading.Event()
+        # Set only when the store does its own retrieval (Postgres); the
+        # in-memory structures stay empty in that mode.
+        self._pg_chunks = 0
+        self._pg_documents = 0
 
     # ------------------------------------------------------------ build
 
@@ -287,6 +291,18 @@ class HybridIndex:
         Takes the repo rather than a database session so the index does not
         care whether the chunks came from SQLite or Firestore.
         """
+        delegate = _delegating_store(store)
+        if delegate is not None:
+            # Nothing to build: the index is a GIN index and it is already
+            # maintained on write. Just record what is in there.
+            count = delegate.count_active_chunks()
+            with self._lock:
+                self._pg_chunks = count
+                self._pg_documents = delegate.count_active_documents()
+                self.ready = True
+            self._first_build.set()
+            return count
+
         if store is None:
             from repo import get_repo
 
