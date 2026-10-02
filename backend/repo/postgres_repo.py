@@ -465,3 +465,25 @@ class PostgresRepo:
             )
         return message
 
+    # ---------------------------------------------------------------- audit
+
+    def append_audit(self, entry: AuditEntry) -> None:
+        with get_pool().connection() as c:
+            c.execute(
+                """INSERT INTO audit (id, at, user_id, user_email, action, target, detail, ip)
+                   VALUES (%(id)s, %(at)s, %(user_id)s, %(user_email)s, %(action)s,
+                       %(target)s, %(detail)s, %(ip)s)""",
+                entry.__dict__,
+            )
+
+    def list_audit(self, limit: int = 200, action: str = "") -> list[AuditEntry]:
+        sql = "SELECT * FROM audit"
+        params: list[Any] = []
+        if action:
+            sql += " WHERE action = %s"
+            params.append(action)
+        sql += " ORDER BY at DESC LIMIT %s"
+        params.append(limit)
+        with get_pool().connection() as c:
+            return _all(AuditEntry, c.execute(sql, params).fetchall())
+
