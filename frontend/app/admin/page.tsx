@@ -131,20 +131,20 @@ export default function AdminPage() {
       )}
 
       {settings && settings.twofa_exempt.length > 0 && (
-        <div className="mb-6 rounded-2xl border border-rose/40 bg-rose/8 p-4">
-          <p className="text-sm font-medium text-rose">
+        <div className="mb-6 rounded-2xl border border-amber/40 bg-amber/8 p-4">
+          <p className="text-sm font-medium text-amber">
             {settings.twofa_exempt.length === 1
-              ? "1 account signs in without two-factor"
-              : `${settings.twofa_exempt.length} accounts sign in without two-factor`}
+              ? "Heads up: this account signs in with just a password"
+              : `Heads up: ${settings.twofa_exempt.length} accounts sign in with just a password`}
           </p>
           <p className="mt-1 text-sm leading-relaxed text-muted">
-            <span className="text-text">{settings.twofa_exempt.join(", ")}</span> — password
-            alone reaches every document in the library, including leadership-only files. Use a
-            long, unique password on {settings.twofa_exempt.length === 1 ? "it" : "them"}, and
-            remove {settings.twofa_exempt.length === 1 ? "it" : "them"} from{" "}
-            <code className="text-cyan">TWOFA_EXEMPT_EMAILS</code> in{" "}
-            <code>backend/.env</code>{" "}
-            once you&apos;re past setup.
+            <span className="text-text">{settings.twofa_exempt.join(", ")}</span> doesn&apos;t
+            need the code from a phone app that other accounts use. That&apos;s convenient, but
+            anyone who learns {settings.twofa_exempt.length === 1 ? "its" : "their"} password
+            could open every document, including leadership-only ones. Keep the password long and
+            don&apos;t share it. When you&apos;re ready for the extra protection, ask whoever set
+            up this assistant to turn on the phone-code step for{" "}
+            {settings.twofa_exempt.length === 1 ? "it" : "them"}.
           </p>
         </div>
       )}
@@ -221,29 +221,28 @@ export default function AdminPage() {
 
           {settings && (
             <section className="rounded-2xl border border-line bg-card/70 p-6">
-              <h2 className="mb-4 text-sm font-semibold text-text">Configuration</h2>
+              <h2 className="mb-4 text-sm font-semibold text-text">Settings</h2>
               <dl className="grid gap-x-8 gap-y-2.5 text-sm sm:grid-cols-2">
-                <Row label="Model" value={`${settings.model} · effort ${settings.effort}`} />
+                <Row label="AI model" value={settings.model} />
+                <Row label="Searchable sections" value={String(stats.index.chunks)} />
                 <Row
-                  label="Retrieval index"
-                  value={`${stats.index.chunks} sections${
-                    stats.index.semantic_enabled ? " · semantic on" : " · keyword only"
-                  }`}
+                  label="Question limit"
+                  value={`${settings.max_queries_per_hour} per person, per hour`}
                 />
-                <Row label="Refusal threshold" value={String(settings.retrieval_min_score)} />
-                <Row label="Rate limit" value={`${settings.max_queries_per_hour} questions/hour`} />
                 <Row
-                  label="Two-factor"
+                  label="Phone-code sign-in"
                   value={
                     settings.require_2fa
                       ? settings.twofa_exempt.length
-                        ? `Required — ${settings.twofa_exempt.length} exempt`
-                        : "Required"
+                        ? `On — ${settings.twofa_exempt.length} account${
+                            settings.twofa_exempt.length === 1 ? " skips" : "s skip"
+                          } it`
+                        : "On for everyone"
                       : "Off"
                   }
                 />
                 <Row
-                  label="Fallback contact"
+                  label="Who staff are told to contact"
                   value={
                     settings.contact_configured
                       ? [settings.org_phone, settings.org_email].filter(Boolean).join(" · ")
