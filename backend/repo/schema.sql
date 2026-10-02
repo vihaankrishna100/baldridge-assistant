@@ -169,3 +169,9 @@ CREATE INDEX IF NOT EXISTS audit_action_idx ON audit (action, at DESC);
 -- One row per user per hour. bump_query_counter upserts and returns the new
 -- count in a single statement, so two concurrent questions cannot both read
 -- the old value and slip past the cap.
+CREATE TABLE IF NOT EXISTS query_counters (
+    user_id     TEXT NOT NULL,
+    hour_bucket TEXT NOT NULL,
+    count       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, hour_bucket)
+);
