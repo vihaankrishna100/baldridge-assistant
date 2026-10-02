@@ -1,0 +1,10 @@
+# Local development and the offline test suite, which run against SQLite and
+# therefore use the in-memory BM25 + LSA index. Never installed on Vercel.
+-r requirements.txt
+
+scikit-learn==1.6.0
+numpy==2.2.1
+
+# Only needed to read the old Cloud Run deployment during migration.
+google-cloud-firestore==2.19.0
+google-cloud-storage==2.19.0
