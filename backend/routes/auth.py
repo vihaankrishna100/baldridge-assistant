@@ -7,10 +7,11 @@ from datetime import datetime, timedelta, timezone
 import qrcode
 import qrcode.image.svg
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials
 
 import audit
 from config import settings
-from deps import current_user
+from deps import bearer, current_user, revoke
 from models import ROLE_TEAM, ROLES
 from repo import get_repo
 from mailer import MailError, send_sign_in_code
@@ -57,6 +58,7 @@ _WINDOW_BUCKETS = 3
 # Returned for both "no such user" and "wrong password" so the endpoint can't
 # be used to enumerate who works here.
 BAD_CREDENTIALS = "Email or password is incorrect."
+_DUMMY_HASH = hash_password("timing-equaliser-not-a-real-password")
 LOCKED = "Too many failed attempts from this device. Try again in about 15 minutes."
 
 
@@ -100,6 +102,9 @@ def login(payload: LoginRequest, request: Request):
     ip = audit.client_ip(request)
 
     if user is None:
+        # Same bcrypt cost as a real check, so response time doesn't reveal
+        # which emails have accounts.
+        verify_password(payload.password, _DUMMY_HASH)
         audit.log("login_failed", target=payload.email, detail="unknown account", request=request)
         raise HTTPException(status_code=401, detail=BAD_CREDENTIALS)
 
@@ -433,6 +438,15 @@ def change_password(
 
 
 @router.post("/logout")
-def logout(request: Request, user: UserRecord = Depends(current_user)):
+def logout(
+    request: Request,
+    user: UserRecord = Depends(current_user),
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+):
+    # Clearing the token in the browser isn't enough on a shared computer: a
+    # copied token would stay valid until it expired. Revoke this one now.
+    payload = decode_token(creds.credentials) if creds else None
+    if payload:
+        revoke(payload)
     audit.log("logout", user=user, request=request)
     return {"ok": True}

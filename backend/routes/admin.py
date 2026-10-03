@@ -50,7 +50,10 @@ def create_invite(
 
     audit.log("invite_created", user=admin, target=email, detail=payload.role, request=request)
 
-    origin = settings.cors_origin_list[0] if settings.cors_origin_list else ""
+    # The site the links open on: the first https origin, so a localhost
+    # entry left in CORS_ORIGINS for development never ends up in an invite.
+    origins = settings.cors_origin_list
+    origin = next((o for o in origins if o.startswith("https://")), origins[0] if origins else "")
     return InviteOut(
         id=invite.id,
         email=invite.email,

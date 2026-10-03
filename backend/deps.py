@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+import hashlib
+
 from config import settings
 from models import ROLE_ADMIN, ROLE_LEADERSHIP, ROLE_TEAM
 from repo import get_repo
@@ -31,6 +33,8 @@ def current_user(
     if not payload or payload.get("scope") != "session":
         raise _unauthorized("Session expired or invalid")
 
+    if is_revoked(payload):
+        raise _unauthorized("Session has ended — please sign in again")
     user = get_repo().get_user(payload.get("sub", ""))
     if user is None or not user.is_active:
         raise _unauthorized("Account is disabled")
@@ -71,6 +75,23 @@ def enforce_rate_limit(user: UserRecord) -> None:
             status_code=429,
             detail=f"You've reached the limit of {limit} questions this hour. Try again shortly.",
         )
+
+
+def _revocation_key(payload: dict) -> str:
+    # Stored in query_counters, whose key column is 32 characters.
+    return "rv:" + hashlib.sha256(str(payload.get("jti", "")).encode()).hexdigest()[:29]
+
+
+def is_revoked(payload: dict) -> bool:
+    return bool(payload.get("jti")) and get_repo().get_query_counter(_revocation_key(payload), "revoked") > 0
+
+
+def revoke(payload: dict) -> None:
+    """Ends one session — the token presented — without touching the user's
+    other sessions. Bumping token_epoch would sign out every device, which on
+    the shared team login means everyone."""
+    if payload.get("jti"):
+        get_repo().bump_query_counter(_revocation_key(payload), "revoked", 1)
 
 
 def get_request(request: Request) -> Request:

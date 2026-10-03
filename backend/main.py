@@ -14,8 +14,19 @@ from repo import get_repo
 from routes import admin, auth, chat, documents
 
 
+INSECURE_SECRETS = {"", "change-me-before-deploying"}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Session tokens are signed with SECRET_KEY. Left at the published default,
+    # anyone could mint an administrator session, so a deployed store refuses
+    # to start without a real one; local SQLite development only warns.
+    if settings.secret_key in INSECURE_SECRETS:
+        if os.getenv("REPO_BACKEND", "sqlite").strip().lower() != "sqlite":
+            raise RuntimeError("SECRET_KEY is unset or the default. Set a long random value.")
+        print("[startup] WARNING: SECRET_KEY is the default — fine locally, never deploy this")
+
     store = get_repo()
     # On a serverless platform the lifespan runs on every cold start, and the
     # DDL is the same every time. It is idempotent, so running it is safe, but

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
@@ -19,6 +20,14 @@ from repo.base import ChunkRecord, DocumentRecord, UserRecord, utcnow
 from schemas import DocumentOut, DocumentUpdate
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+def _attachment(filename: str) -> str:
+    """Content-Disposition for any filename. HTTP headers are latin-1, so an
+    accented letter or a long dash in the raw name would crash the download;
+    the plain fallback is ASCII-only and the real name rides in filename*."""
+    fallback = "".join(c if 32 <= ord(c) < 127 and c not in '"\\' else "_" for c in filename) or "download"
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
 def _chunks_for(doc: DocumentRecord, proto_chunks) -> list[ChunkRecord]:
@@ -250,7 +259,7 @@ def download_document(
         content=data,
         media_type=doc.content_type or "application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="{doc.filename}"',
+            "Content-Disposition": _attachment(doc.filename),
             "Cache-Control": "no-store",
         },
     )
