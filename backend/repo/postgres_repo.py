@@ -111,7 +111,7 @@ atexit.register(close_pool)
 
 def _hydrate(cls: type[T], row: dict[str, Any] | None) -> T | None:
     """Build a dataclass from a row, normalising timestamps to naive UTC and
-    ignoring columns the dataclass does not declare (search_vector)."""
+    ignoring columns the dataclass does not declare."""
     if row is None:
         return None
     names = {f.name for f in dataclass_fields(cls)}
@@ -433,6 +433,13 @@ class PostgresRepo:
     # The INTERSECT runs per surviving row rather than through the GIN index.
     # At 645 chunks that is immaterial; past roughly 100k it would need to
     # become a two-stage query (index-narrowed candidates, then rescored).
+    # Must match the chunks_fts_idx expression in schema.sql character for
+    # character, or the planner falls back to a sequential scan.
+    SEARCH_VECTOR = (
+        "(setweight(to_tsvector('english'::regconfig, coalesce(c.heading, '')), 'B') || "
+        "setweight(to_tsvector('english'::regconfig, coalesce(c.text, '')), 'A'))"
+    )
+
     _SEARCH_SQL = """
         WITH q AS (
             SELECT {query_expr} AS tsq,
@@ -442,16 +449,16 @@ class PostgresRepo:
                c.document_title, c.category, c.visibility, c.document_active,
                CASE WHEN cardinality(q.terms) = 0 THEN 0::float8
                     ELSE cardinality(ARRAY(
-                             SELECT unnest(tsvector_to_array(c.search_vector))
+                             SELECT unnest(tsvector_to_array({vec}))
                              INTERSECT
                              SELECT unnest(q.terms)
                          ))::float8 / cardinality(q.terms)
                END AS score,
-               ts_rank_cd(c.search_vector, q.tsq, 32) AS density
+               ts_rank_cd({vec}, q.tsq, 32) AS density
         FROM chunks c, q
         WHERE c.document_active
           AND c.visibility = ANY(%(vis)s)
-          AND c.search_vector @@ q.tsq
+          AND {vec} @@ q.tsq
         ORDER BY score DESC, density DESC
         LIMIT %(lim)s
     """
@@ -477,10 +484,10 @@ class PostgresRepo:
         params = {"q": query, "vis": list(visibilities), "lim": limit}
         with get_pool().connection() as c:
             rows = c.execute(
-                self._SEARCH_SQL.format(query_expr=self._STRICT), params).fetchall()
+                self._SEARCH_SQL.format(query_expr=self._STRICT, vec=self.SEARCH_VECTOR), params).fetchall()
             if not rows:
                 rows = c.execute(
-                    self._SEARCH_SQL.format(query_expr=self._RELAXED), params).fetchall()
+                    self._SEARCH_SQL.format(query_expr=self._RELAXED, vec=self.SEARCH_VECTOR), params).fetchall()
         out: list[tuple[ChunkRecord, float]] = []
         for row in rows:
             score = float(row.pop("score") or 0.0)
@@ -575,7 +582,17 @@ class PostgresRepo:
     def bootstrap(self) -> None:
         ddl = (Path(__file__).parent / "schema.sql").read_text()
         with get_pool().connection() as c:
+            had_stored_vector = c.execute(
+                """SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'chunks' AND column_name = 'search_vector'"""
+            ).fetchone() is not None
             c.execute(ddl)
+        if had_stored_vector:
+            # Dropping a column leaves its bytes in every row until the table
+            # is rewritten. Once, on the upgrade: chunks is small and the lock
+            # lasts well under a second.
+            with get_pool().connection() as c:  # pool connections autocommit
+                c.execute("VACUUM FULL chunks")
 
     # ------------------------------------------------- document bytes (blobs)
 

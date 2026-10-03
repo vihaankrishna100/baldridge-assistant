@@ -102,15 +102,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     document_title  TEXT NOT NULL DEFAULT '',
     category        TEXT NOT NULL DEFAULT 'General',
     visibility      TEXT NOT NULL DEFAULT 'staff',
-    document_active BOOLEAN NOT NULL DEFAULT TRUE,
-
-    -- The retrieval index itself. Heading is weighted B and body A: a heading
-    -- match is a useful signal but a body match is what actually answers the
-    -- question. Stored, so it is computed on write, not per query.
-    search_vector   TSVECTOR GENERATED ALWAYS AS (
-        setweight(to_tsvector('english', coalesce(heading, '')), 'B') ||
-        setweight(to_tsvector('english', coalesce(text, '')), 'A')
-    ) STORED
+    document_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 -- Chunks are a search copy that may belong to a document kept in GitHub, with
@@ -118,12 +110,23 @@ CREATE TABLE IF NOT EXISTS chunks (
 -- created before that change; delete_document removes chunks explicitly.
 ALTER TABLE chunks DROP CONSTRAINT IF EXISTS chunks_document_id_fkey;
 
-CREATE INDEX IF NOT EXISTS chunks_search_idx ON chunks USING GIN (search_vector);
+-- The retrieval index. Heading is weighted B and body A: a heading match is a
+-- useful signal but a body match is what actually answers the question. It is
+-- an index on the expression, not a stored column: storing the tsvector cost
+-- about as much space as the text itself, and the 512 MB plan is the limit
+-- on how many documents fit. Queries must repeat this expression exactly
+-- (postgres_repo.SEARCH_VECTOR) for the planner to use the index.
+-- Databases created earlier had the stored column and a heading trigram index
+-- nothing queried; both go, and repo bootstrap compacts the table once.
+DROP INDEX IF EXISTS chunks_heading_trgm_idx;
+ALTER TABLE chunks DROP COLUMN IF EXISTS search_vector;
+CREATE INDEX IF NOT EXISTS chunks_fts_idx ON chunks USING GIN ((
+    setweight(to_tsvector('english'::regconfig, coalesce(heading, '')), 'B') ||
+    setweight(to_tsvector('english'::regconfig, coalesce(text, '')), 'A')
+));
 CREATE INDEX IF NOT EXISTS chunks_document_idx ON chunks (document_id, ordinal);
 -- Visibility is part of every search's WHERE clause, so it is worth its own index.
 CREATE INDEX IF NOT EXISTS chunks_visible_idx ON chunks (visibility) WHERE document_active;
--- Trigram index over headings, for matching a section the user half-remembers.
-CREATE INDEX IF NOT EXISTS chunks_heading_trgm_idx ON chunks USING GIN (heading gin_trgm_ops);
 
 -- Chat history is session-only: the browser holds the last few turns and
 -- resends them with each question. Nothing about a conversation is written
