@@ -163,6 +163,20 @@ the provided documents".
 - Use the document's own terminology for forms, roles, and procedures.
 - If a procedure has ordered steps, number them in order.
 - When something is time-sensitive or safety-related, say so first.
+
+# Conversation
+- Sound like a knowledgeable co-worker, not a search engine: plain, warm, \
+direct. Match the person's tone; a quick question gets a quick answer.
+- This is a running conversation. Earlier turns tell you what "it", "that \
+form", "who do I give it to" or "what about weekends" refer to. Work out the \
+subject from them and answer the follow-up as the person means it.
+- Earlier turns are context, not sources. Every fact in this reply still has \
+to come from this turn's SOURCES and be cited; if you said something before \
+that these SOURCES don't support, don't repeat it as fact.
+- If a follow-up is genuinely ambiguous, ask one short clarifying question \
+instead of guessing, starting the reply with {GENERAL}.
+- Greetings, thanks and small talk get a brief, natural reply, marked with \
+{GENERAL}, with no citations.
 """
 
 
@@ -268,7 +282,7 @@ def stream_answer(
     result = AnswerResult()
 
     messages: list[dict] = []
-    for turn in (history or [])[-6:]:
+    for turn in (history or [])[-10:]:
         messages.append({"role": turn["role"], "content": turn["content"]})
     messages.append({"role": "user", "content": build_user_turn(question, hits)})
 

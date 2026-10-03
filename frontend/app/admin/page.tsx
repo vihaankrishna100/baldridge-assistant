@@ -14,6 +14,7 @@ type Stats = {
   answered_30d: number;
   escalated_30d: number;
   answer_rate: number;
+  window_days: number;
   index: { chunks: number; documents: number; semantic_enabled: boolean };
   coverage_gaps: { question: string; count: number }[];
   storage: Storage | null;
@@ -63,6 +64,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [retention, setRetention] = useState<{ days: number; choices: number[] } | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("staff");
   const [inviteLink, setInviteLink] = useState("");
@@ -71,18 +73,20 @@ export default function AdminPage() {
 
   const load = useCallback(async () => {
     try {
-      const [s, cfg, u, i, a] = await Promise.all([
+      const [s, cfg, u, i, a, r] = await Promise.all([
         api<Stats>("/admin/stats"),
         api<Settings>("/admin/settings"),
         api<User[]>("/admin/users"),
         api<Invite[]>("/admin/invites"),
         api<AuditRow[]>("/admin/audit?limit=150"),
+        api<{ days: number; choices: number[] }>("/admin/audit/retention"),
       ]);
       setStats(s);
       setSettings(cfg);
       setUsers(u);
       setInvites(i);
       setAudit(a);
+      setRetention(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load the admin data.");
     }
@@ -91,6 +95,27 @@ export default function AdminPage() {
   useEffect(() => {
     if (user) void load();
   }, [user, load]);
+
+  const changeRetention = async (days: number) => {
+    setError("");
+    try {
+      await api("/admin/audit/retention", { method: "PUT", body: { days } });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change how long the log is kept.");
+    }
+  };
+
+  const clearAudit = async () => {
+    if (!confirm("Clear the whole audit log? This can't be undone. The question stats reset too.")) return;
+    setError("");
+    try {
+      await api("/admin/audit", { method: "DELETE" });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not clear the audit log.");
+    }
+  };
 
   const createInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,12 +226,12 @@ export default function AdminPage() {
             <Stat label="Active staff" value={stats.users} />
             <Stat label="Live documents" value={stats.documents} />
             <Stat
-              label="Answered from docs (30d)"
+              label={`Answered from docs (${stats.window_days}d)`}
               value={stats.answered_30d}
               hint={`${Math.round(stats.answer_rate * 100)}% of questions`}
             />
             <Stat
-              label="Referred to a person (30d)"
+              label={`Referred to a person (${stats.window_days}d)`}
               value={stats.escalated_30d}
               hint="Working as designed"
               tone="amber"
@@ -427,11 +452,37 @@ export default function AdminPage() {
 
       {tab === "audit" && (
         <section className="overflow-hidden rounded-2xl border border-line bg-card/50">
-          <div className="border-b border-line px-5 py-3.5">
-            <h2 className="text-sm font-semibold text-text">Audit trail</h2>
-            <p className="mt-0.5 text-xs text-muted">
-              Every sign-in, document access, and question. Append-only.
-            </p>
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-5 py-3.5">
+            <div>
+              <h2 className="text-sm font-semibold text-text">Audit trail</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Every sign-in, document access, and question. Older entries are removed automatically.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {retention && (
+                <label className="flex items-center gap-2 text-xs text-muted">
+                  Keep for
+                  <select
+                    value={retention.days}
+                    onChange={(e) => void changeRetention(Number(e.target.value))}
+                    className="rounded-lg border border-line bg-ink/60 px-2.5 py-1.5 text-xs text-text outline-none focus:border-cyan/50"
+                  >
+                    {retention.choices.map((d) => (
+                      <option key={d} value={d}>
+                        {d === 0 ? "Forever" : d === 1 ? "1 day" : `${d} days`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <button
+                onClick={() => void clearAudit()}
+                className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted hover:text-rose"
+              >
+                Clear log
+              </button>
+            </div>
           </div>
           <div className="max-h-[65vh] overflow-auto">
             <table className="w-full text-left text-sm">

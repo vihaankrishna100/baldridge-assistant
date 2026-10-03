@@ -122,7 +122,7 @@ class AskRequest(BaseModel):
     # The last few turns of this conversation, held by the browser for the
     # life of the tab and resent with each question — chat history is
     # session-only and is never written to the database. Capped well above
-    # what the model actually uses (the last 6) so a stray client can't pad
+    # what the model actually uses (the last 10) so a stray client can't pad
     # the request without limit.
     history: list[HistoryTurn] = Field(default_factory=list, max_length=20)
 

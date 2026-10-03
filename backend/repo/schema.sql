@@ -134,6 +134,12 @@ CREATE INDEX IF NOT EXISTS chunks_visible_idx ON chunks (visibility) WHERE docum
 -- log instead, which already records every question regardless.
 
 -- ---------------------------------------------------------------- audit
+-- Settings an admin changes from the UI (env vars cover the rest).
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit (
     id         TEXT PRIMARY KEY,
     at         TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),

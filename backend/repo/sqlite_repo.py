@@ -266,6 +266,26 @@ class SqliteRepo:
             rows = q.order_by(m.AuditLog.at.desc()).limit(limit).all()
             return [_audit(r) for r in rows]
 
+    def delete_audit_before(self, cutoff: datetime | None) -> int:
+        """Removes audit rows older than cutoff, or every row when None."""
+        with SessionLocal() as s:
+            q = s.query(m.AuditLog)
+            if cutoff is not None:
+                q = q.filter(m.AuditLog.at < cutoff)
+            n = q.delete(synchronize_session=False)
+            s.commit()
+            return n
+
+    def get_setting(self, key: str) -> str | None:
+        with SessionLocal() as s:
+            row = s.get(m.AppSetting, key)
+            return row.value if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with SessionLocal() as s:
+            s.merge(m.AppSetting(key=key, value=value))
+            s.commit()
+
     # ----------------------------------------------------------- statistics
 
     def count_questions_since(self, since: datetime, escalated: bool) -> int:

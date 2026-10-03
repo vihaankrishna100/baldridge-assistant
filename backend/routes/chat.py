@@ -125,7 +125,20 @@ def ask(
         # while the index is still warming would look like an empty library.
         reason = "no_documents"
     else:
-        hits = index.search(question, visible_tiers_for_role(user.role))
+        tiers = visible_tiers_for_role(user.role)
+        hits = index.search(question, tiers)
+        # A follow-up like "who do I give it to once it's done?" names nothing
+        # searchable — "it" is in the previous question. Searching the two
+        # together finds the passages the conversation is actually about;
+        # merging keeps whichever match scores better, so a follow-up that
+        # changes the subject still gets its own hits.
+        previous = next((t["content"] for t in reversed(history) if t["role"] == "user"), "")
+        if previous:
+            merged = {h.chunk_id: h for h in hits}
+            for h in index.search(f"{previous[:500]} {question}", tiers):
+                if h.chunk_id not in merged or h.score > merged[h.chunk_id].score:
+                    merged[h.chunk_id] = h
+            hits = sorted(merged.values(), key=lambda h: h.score, reverse=True)[: settings.retrieval_top_k]
         # No score gate here any more. A weak retrieval score means the corpus
         # doesn't cover the question — but that is exactly the case where the
         # answer might be ordinary world knowledge ("how many ounces in a cup"),

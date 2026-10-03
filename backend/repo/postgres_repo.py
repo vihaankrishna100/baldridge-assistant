@@ -519,6 +519,29 @@ class PostgresRepo:
         with get_pool().connection() as c:
             return _all(AuditEntry, c.execute(sql, params).fetchall())
 
+    def delete_audit_before(self, cutoff: datetime | None) -> int:
+        """Removes audit rows older than cutoff, or every row when None."""
+        with get_pool().connection() as c:
+            if cutoff is None:
+                return c.execute("DELETE FROM audit").rowcount
+            return c.execute("DELETE FROM audit WHERE at < %s", (cutoff,)).rowcount
+
+    # ------------------------------------------------------- app settings
+
+    def get_setting(self, key: str) -> str | None:
+        self.upgrade_if_needed()
+        with get_pool().connection() as c:
+            row = c.execute("SELECT value FROM app_settings WHERE key = %s", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.upgrade_if_needed()
+        with get_pool().connection() as c:
+            c.execute(
+                """INSERT INTO app_settings (key, value) VALUES (%s, %s)
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
+                (key, value))
+
     # ----------------------------------------------------------- statistics
 
     def count_questions_since(self, since: datetime, escalated: bool) -> int:
@@ -601,14 +624,16 @@ class PostgresRepo:
         """Production sets SKIP_BOOTSTRAP, so a schema change would never reach
         it. Document uploads, deletes and the storage meter call this instead:
         one cheap lookup, and the full bootstrap only on a database still in
-        the old layout. Remembered per process after the first check."""
+        the old layout or missing a newer table. Remembered per process after the first check."""
         if type(self)._schema_current:
             return
         with get_pool().connection() as c:
             stale = c.execute(
                 """SELECT 1 FROM information_schema.columns
                    WHERE table_name = 'chunks' AND column_name = 'search_vector'"""
-            ).fetchone() is not None
+            ).fetchone() is not None or c.execute(
+                "SELECT to_regclass('app_settings') IS NULL AS missing"
+            ).fetchone()["missing"]
         if stale:
             self.bootstrap()
         type(self)._schema_current = True

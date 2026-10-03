@@ -107,7 +107,7 @@ export default function ChatPage() {
             content: t.text,
           }),
         )
-        .slice(-6);
+        .slice(-10);
 
       const answerId = `a-${Date.now()}`;
       setTurns((prev) => [

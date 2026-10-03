@@ -141,6 +141,14 @@ class AuditLog(Base):
     ip: Mapped[str] = mapped_column(String(60), default="")
 
 
+class AppSetting(Base):
+    """Settings an admin changes from the UI (env vars cover the rest)."""
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
 class QueryCounter(Base):
     """Per-user hourly rate limit bucket."""
 

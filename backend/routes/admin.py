@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 import audit
 from config import settings
@@ -258,10 +259,46 @@ def audit_trail(
     ]
 
 
+class RetentionIn(BaseModel):
+    days: int
+
+
+@router.get("/audit/retention")
+def get_audit_retention(_: UserRecord = Depends(require_admin)):
+    return {"days": audit.retention_days(), "choices": list(audit.RETENTION_CHOICES)}
+
+
+@router.put("/audit/retention")
+def put_audit_retention(
+    payload: RetentionIn, request: Request, user: UserRecord = Depends(require_admin),
+):
+    if payload.days not in audit.RETENTION_CHOICES:
+        raise HTTPException(status_code=400, detail="Pick one of the listed retention periods.")
+    audit.set_retention_days(payload.days)
+    audit.log("audit_retention_changed", user=user,
+              detail="keep forever" if payload.days == 0 else f"{payload.days} days",
+              request=request)
+    return {"days": payload.days}
+
+
+@router.delete("/audit")
+def clear_audit(request: Request, user: UserRecord = Depends(require_admin)):
+    """Empties the trail, then records who emptied it, so the clear itself is
+    never invisible."""
+    audit.flush_pending()
+    removed = get_repo().delete_audit_before(None)
+    audit.log("audit_cleared", user=user, detail=f"{removed} entries removed", request=request)
+    return {"removed": removed}
+
+
 @router.get("/stats")
 def stats(_: UserRecord = Depends(require_admin)):
     store = get_repo()
-    since = utcnow() - timedelta(days=30)
+    # Stats are read from the audit trail, so they can't reach further back
+    # than it is kept.
+    keep = audit.retention_days()
+    window = min(30, keep) if keep > 0 else 30
+    since = utcnow() - timedelta(days=window)
     answered = store.count_questions_since(since, escalated=False)
     escalated = store.count_questions_since(since, escalated=True)
     total = answered + escalated
@@ -273,6 +310,7 @@ def stats(_: UserRecord = Depends(require_admin)):
         "answered_30d": answered,
         "escalated_30d": escalated,
         "answer_rate": round(answered / total, 3) if total else 0.0,
+        "window_days": window,
         "index": index.stats(),
         "storage": (
             {
