@@ -92,6 +92,9 @@ class RepoDocStore:
     def get_bytes(self, doc: DocumentRecord) -> bytes | None:
         return get_blobs().get(doc.id)
 
+    def restore_bytes(self, doc: DocumentRecord, data: bytes) -> None:
+        get_blobs().put(doc.id, data)
+
 
 # -------------------------------------------------------------------- GitHub
 
@@ -269,6 +272,10 @@ class GitHubDocStore:
         return r.content if r.status_code == 200 else None
 
     # ------------------------------------------------------------ writes
+
+    def restore_bytes(self, doc: DocumentRecord, data: bytes) -> None:
+        self._commit(f"Restore file for {doc.title}", lambda entries: entries,
+                     files={self.file_path(doc): data})
 
     def publish(
         self,

@@ -116,6 +116,12 @@ async def upload_document(
     checksum = hashlib.sha256(data).hexdigest()
 
     duplicate = docs.find_active_by_checksum(checksum)
+    if duplicate and not replaces and docs.get_bytes(duplicate) is None:
+        # Same file as a library entry whose original went missing (e.g. lost
+        # in a migration): put the original back instead of refusing it.
+        docs.restore_bytes(duplicate, data)
+        audit.log("document_file_restored", user=user, target=duplicate.title, request=request)
+        return DocumentOut.model_validate(duplicate)
     if duplicate and not replaces:
         raise HTTPException(
             status_code=409,
@@ -252,7 +258,13 @@ def download_document(
 
     data = docs.get_bytes(doc)
     if data is None:
-        raise HTTPException(status_code=410, detail="The original file is no longer stored.")
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "The original file is missing. Its text is still searchable — an "
+                "administrator can restore the file by uploading the same document again."
+            ),
+        )
 
     audit.log("document_downloaded", user=user, target=doc.title, request=request)
     return Response(
