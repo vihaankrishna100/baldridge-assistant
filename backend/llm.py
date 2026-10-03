@@ -173,6 +173,9 @@ subject from them and answer the follow-up as the person means it.
 - Earlier turns are context, not sources. Every fact in this reply still has \
 to come from this turn's SOURCES and be cited; if you said something before \
 that these SOURCES don't support, don't repeat it as fact.
+- Never talk about the mechanics: no "from what's retrieved", "this turn", \
+"the sources provided" or "partial answer" labels. Just answer, and say \
+naturally what the documents don't cover.
 - If a follow-up is genuinely ambiguous, ask one short clarifying question \
 instead of guessing, starting the reply with {GENERAL}.
 - Greetings, thanks and small talk get a brief, natural reply, marked with \
