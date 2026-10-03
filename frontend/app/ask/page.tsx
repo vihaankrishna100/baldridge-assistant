@@ -5,7 +5,7 @@ import AppShell from "@/components/AppShell";
 import Answer from "@/components/Answer";
 import EscalationCard, { type Escalation } from "@/components/EscalationCard";
 import { ArrowIcon, SearchIcon } from "@/components/Icons";
-import { API_BASE, ask, getToken, type SourceRef } from "@/lib/api";
+import { API_BASE, CHAT_KEY, ask, getToken, type HistoryTurn, type SourceRef } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 
 type Turn =
@@ -49,11 +49,41 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [conversationId, setConversationId] = useState<string | null>(null);
   const [openSource, setOpenSource] = useState<SourceRef | null>(null);
+  const [restored, setRestored] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // The conversation lives in this tab only: restored on load, saved on every
+  // change, gone when the tab closes or the user signs out.
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(CHAT_KEY);
+      // A turn still marked streaming was cut off by a reload; show what arrived.
+      if (saved)
+        setTurns(
+          (JSON.parse(saved) as Turn[]).map((t) =>
+            t.kind === "answer" ? { ...t, streaming: false } : t,
+          ),
+        );
+    } catch {
+      /* unreadable or blocked storage: start fresh */
+    }
+    // Same render as the restored turns, so the save below never sees the
+    // empty initial list and wipes what was just read back.
+    setRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    try {
+      if (turns.length) window.sessionStorage.setItem(CHAT_KEY, JSON.stringify(turns));
+      else window.sessionStorage.removeItem(CHAT_KEY);
+    } catch {
+      /* storage full or blocked: the chat still works, it just won't survive a reload */
+    }
+  }, [turns, restored]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -67,6 +97,17 @@ export default function ChatPage() {
       setError("");
       setInput("");
       setBusy(true);
+
+      // Context for follow-ups. Escalations have no text and are skipped.
+      const history: HistoryTurn[] = turns
+        .filter((t) => t.text.trim() && (t.kind === "question" || !t.escalation))
+        .map(
+          (t): HistoryTurn => ({
+            role: t.kind === "question" ? "user" : "assistant",
+            content: t.text,
+          }),
+        )
+        .slice(-6);
 
       const answerId = `a-${Date.now()}`;
       setTurns((prev) => [
@@ -94,9 +135,8 @@ export default function ChatPage() {
           }),
         );
 
-      await ask(trimmed, conversationId, {
+      await ask(trimmed, history, {
         onMeta: (data) => {
-          setConversationId(data.conversation_id);
           patch((t) => {
             t.sources = data.sources;
           });
@@ -129,7 +169,7 @@ export default function ChatPage() {
       setBusy(false);
       textareaRef.current?.focus();
     },
-    [busy, conversationId],
+    [busy, turns],
   );
 
   if (loading || !user) {

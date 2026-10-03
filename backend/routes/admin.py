@@ -259,8 +259,8 @@ def audit_trail(
 def stats(_: UserRecord = Depends(require_admin)):
     store = get_repo()
     since = utcnow() - timedelta(days=30)
-    answered = store.count_messages_since(since, escalated=False)
-    escalated = store.count_messages_since(since, escalated=True)
+    answered = store.count_questions_since(since, escalated=False)
+    escalated = store.count_questions_since(since, escalated=True)
     total = answered + escalated
 
     return {

@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     String,
@@ -127,35 +126,6 @@ class Chunk(Base):
     text: Mapped[str] = mapped_column(Text)
 
     document: Mapped[Document] = relationship(back_populates="chunks")
-
-
-class Conversation(Base):
-    __tablename__ = "conversations"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
-    user_id: Mapped[str] = mapped_column(String(32), index=True)
-    title: Mapped[str] = mapped_column(String(300), default="New question")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-
-
-class Message(Base):
-    __tablename__ = "messages"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
-    conversation_id: Mapped[str] = mapped_column(String(32), index=True)
-    role: Mapped[str] = mapped_column(String(20))  # user | assistant
-    content: Mapped[str] = mapped_column(Text)
-
-    # assistant-only bookkeeping
-    answered: Mapped[bool] = mapped_column(Boolean, default=True)
-    escalated: Mapped[bool] = mapped_column(Boolean, default=False)
-    escalation_reason: Mapped[str] = mapped_column(String(60), default="")
-    citations_json: Mapped[str] = mapped_column(Text, default="[]")
-    top_score: Mapped[float] = mapped_column(Float, default=0.0)
-    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class AuditLog(Base):

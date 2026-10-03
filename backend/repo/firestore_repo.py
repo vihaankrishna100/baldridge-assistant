@@ -24,11 +24,9 @@ from google.cloud import firestore
 from .base import (
     AuditEntry,
     ChunkRecord,
-    ConversationRecord,
     DocumentRecord,
     EmailTaken,
     InviteRecord,
-    MessageRecord,
     UserRecord,
     as_naive_utc,
 )
@@ -247,51 +245,6 @@ class FirestoreRepo:
             .stream()
         ]
 
-    # -------------------------------------------------------- conversations
-
-    def get_conversation(self, conversation_id: str) -> ConversationRecord | None:
-        snap = self._col("conversations").document(conversation_id).get()
-        return _from_dict(ConversationRecord, snap.to_dict()) if snap.exists else None
-
-    def list_conversations(self, user_id: str, limit: int = 50) -> list[ConversationRecord]:
-        rows = [
-            _from_dict(ConversationRecord, d.to_dict())
-            for d in self._col("conversations")
-            .where(filter=firestore.FieldFilter("user_id", "==", user_id))
-            .stream()
-        ]
-        rows.sort(key=lambda c: c.updated_at, reverse=True)
-        return rows[:limit]
-
-    def create_conversation(self, conversation: ConversationRecord) -> ConversationRecord:
-        self._col("conversations").document(conversation.id).set(_to_dict(conversation))
-        return conversation
-
-    def save_conversation(self, conversation: ConversationRecord) -> None:
-        self._col("conversations").document(conversation.id).set(_to_dict(conversation))
-
-    def delete_conversation(self, conversation_id: str) -> None:
-        for doc in (
-            self._col("messages")
-            .where(filter=firestore.FieldFilter("conversation_id", "==", conversation_id))
-            .stream()
-        ):
-            doc.reference.delete()
-        self._col("conversations").document(conversation_id).delete()
-
-    def list_messages(self, conversation_id: str) -> list[MessageRecord]:
-        rows = [
-            _from_dict(MessageRecord, d.to_dict())
-            for d in self._col("messages")
-            .where(filter=firestore.FieldFilter("conversation_id", "==", conversation_id))
-            .stream()
-        ]
-        return sorted(rows, key=lambda m: m.created_at)
-
-    def add_message(self, message: MessageRecord) -> MessageRecord:
-        self._col("messages").document(message.id).set(_to_dict(message))
-        return message
-
     # ---------------------------------------------------------------- audit
 
     def append_audit(self, entry: AuditEntry) -> None:
@@ -306,12 +259,14 @@ class FirestoreRepo:
 
     # ----------------------------------------------------------- statistics
 
-    def count_messages_since(self, since: datetime, escalated: bool) -> int:
+    def count_questions_since(self, since: datetime, escalated: bool) -> int:
+        """Answered vs. escalated questions, read from the audit log — chat
+        history itself is session-only and never reaches this database."""
+        action = "question_escalated" if escalated else "question_answered"
         query = (
-            self._col("messages")
-            .where(filter=firestore.FieldFilter("role", "==", "assistant"))
-            .where(filter=firestore.FieldFilter("escalated", "==", escalated))
-            .where(filter=firestore.FieldFilter("created_at", ">=", since))
+            self._col("audit")
+            .where(filter=firestore.FieldFilter("action", "==", action))
+            .where(filter=firestore.FieldFilter("at", ">=", since))
         )
         return _count(query)
 

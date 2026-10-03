@@ -36,11 +36,9 @@ from psycopg_pool import ConnectionPool
 from .base import (
     AuditEntry,
     ChunkRecord,
-    ConversationRecord,
     DocumentRecord,
     EmailTaken,
     InviteRecord,
-    MessageRecord,
     UserRecord,
     as_naive_utc,
     utcnow,
@@ -362,7 +360,9 @@ class PostgresRepo:
     _STORAGE_GROUPS = {
         "documents": ("documents", "document_blobs", "chunks"),
         "users": ("users", "invites", "query_counters"),
-        "chat history": ("conversations", "messages"),
+        # Left over from before chat history went session-only. Nothing writes
+        # these any more; the line disappears (0 bytes) once they are dropped.
+        "old chat history": ("conversations", "messages"),
         "audit log": ("audit",),
     }
 
@@ -490,59 +490,6 @@ class PostgresRepo:
                 out.append((chunk, score))
         return out
 
-    # -------------------------------------------------------- conversations
-
-    def get_conversation(self, conversation_id: str) -> ConversationRecord | None:
-        with get_pool().connection() as c:
-            return _hydrate(ConversationRecord, c.execute(
-                "SELECT * FROM conversations WHERE id = %s", (conversation_id,)).fetchone())
-
-    def list_conversations(self, user_id: str, limit: int = 50) -> list[ConversationRecord]:
-        with get_pool().connection() as c:
-            return _all(ConversationRecord, c.execute(
-                """SELECT * FROM conversations WHERE user_id = %s
-                   ORDER BY updated_at DESC LIMIT %s""",
-                (user_id, limit)).fetchall())
-
-    def create_conversation(self, conversation: ConversationRecord) -> ConversationRecord:
-        with get_pool().connection() as c:
-            c.execute(
-                """INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-                   VALUES (%(id)s, %(user_id)s, %(title)s, %(created_at)s, %(updated_at)s)""",
-                conversation.__dict__,
-            )
-        return conversation
-
-    def save_conversation(self, conversation: ConversationRecord) -> None:
-        with get_pool().connection() as c:
-            c.execute(
-                "UPDATE conversations SET title=%(title)s, updated_at=%(updated_at)s WHERE id=%(id)s",
-                conversation.__dict__,
-            )
-
-    def delete_conversation(self, conversation_id: str) -> None:
-        with get_pool().connection() as c:
-            c.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
-
-    def list_messages(self, conversation_id: str) -> list[MessageRecord]:
-        with get_pool().connection() as c:
-            return _all(MessageRecord, c.execute(
-                "SELECT * FROM messages WHERE conversation_id = %s ORDER BY created_at",
-                (conversation_id,)).fetchall())
-
-    def add_message(self, message: MessageRecord) -> MessageRecord:
-        with get_pool().connection() as c:
-            c.execute(
-                """INSERT INTO messages (id, conversation_id, role, content, answered,
-                       escalated, escalation_reason, citations_json, top_score,
-                       input_tokens, output_tokens, created_at)
-                   VALUES (%(id)s, %(conversation_id)s, %(role)s, %(content)s, %(answered)s,
-                       %(escalated)s, %(escalation_reason)s, %(citations_json)s,
-                       %(top_score)s, %(input_tokens)s, %(output_tokens)s, %(created_at)s)""",
-                message.__dict__,
-            )
-        return message
-
     # ---------------------------------------------------------------- audit
 
     def append_audit(self, entry: AuditEntry) -> None:
@@ -567,12 +514,14 @@ class PostgresRepo:
 
     # ----------------------------------------------------------- statistics
 
-    def count_messages_since(self, since: datetime, escalated: bool) -> int:
+    def count_questions_since(self, since: datetime, escalated: bool) -> int:
+        """Answered vs. escalated questions, read from the audit log — chat
+        history itself is session-only and never reaches this database."""
+        action = "question_escalated" if escalated else "question_answered"
         with get_pool().connection() as c:
             return c.execute(
-                """SELECT count(*) AS n FROM messages
-                   WHERE created_at >= %s AND escalated = %s AND role = 'assistant'""",
-                (since, escalated)).fetchone()["n"]
+                "SELECT count(*) AS n FROM audit WHERE action = %s AND at >= %s",
+                (action, since)).fetchone()["n"]
 
     def coverage_gaps(self, since: datetime, limit: int = 15) -> list[tuple[str, int]]:
         """What staff keep asking that the library does not answer.

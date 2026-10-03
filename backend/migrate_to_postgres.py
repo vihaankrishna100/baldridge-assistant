@@ -96,18 +96,7 @@ def main() -> int:
         dst.create_document(d, by_doc.get(d.id, []))
         print(f"  document: {d.title} — {len(by_doc.get(d.id, []))} chunks")
 
-    # ------------------------------------------------------ conversations
-    convos = 0
-    msgs = 0
-    for u in users:
-        for conv in src.list_conversations(u.id, limit=10_000):
-            if dst.get_conversation(conv.id) is None:
-                dst.create_conversation(conv)
-                convos += 1
-            for m in src.list_messages(conv.id):
-                dst.add_message(m)
-                msgs += 1
-    print(f"  conversations: {convos}, messages: {msgs}")
+    # Chat history is session-only, so conversations are not carried across.
 
     # -------------------------------------------------------------- audit
     for entry in reversed(audit):  # oldest first, so `at DESC` reads naturally

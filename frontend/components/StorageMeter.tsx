@@ -53,7 +53,7 @@ export default function StorageMeter({
       )}
 
       <p className="mt-3 text-[12px] text-faint">
-        The whole database — accounts, documents, chat history, and the audit log.{" "}
+        The whole database — accounts, documents, and the audit log.{" "}
         {filesInGitHub
           ? "Original files are kept in GitHub, so only their searchable text counts here."
           : "Includes the original files and their searchable text."}{" "}

@@ -5,6 +5,11 @@ export const API_BASE =
 // is the right default for a shared workstation at a residential facility.
 const TOKEN_KEY = "bra.token";
 
+// The current conversation, kept for the life of the tab and never sent to the
+// database. Cleared with the token, so the next person to sign in on a shared
+// computer starts with an empty chat.
+export const CHAT_KEY = "bra.chat";
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.sessionStorage.getItem(TOKEN_KEY);
@@ -13,31 +18,10 @@ export function getToken(): string | null {
 export function setToken(token: string | null) {
   if (typeof window === "undefined") return;
   if (token) window.sessionStorage.setItem(TOKEN_KEY, token);
-  else window.sessionStorage.removeItem(TOKEN_KEY);
-}
-
-// A random id for this browser. The shared team login keeps chat history per
-// device with it, so coworkers on other machines never see each other's
-// questions. Personal accounts ignore it.
-const DEVICE_KEY = "bra.device";
-
-function deviceId(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    let id = window.localStorage.getItem(DEVICE_KEY);
-    if (!id) {
-      id = crypto.randomUUID();
-      window.localStorage.setItem(DEVICE_KEY, id);
-    }
-    return id;
-  } catch {
-    return "";
+  else {
+    window.sessionStorage.removeItem(TOKEN_KEY);
+    window.sessionStorage.removeItem(CHAT_KEY);
   }
-}
-
-function deviceHeader(): Record<string, string> {
-  const id = deviceId();
-  return id ? { "X-Device-Id": id } : {};
 }
 
 export class ApiError extends Error {
@@ -59,7 +43,6 @@ export async function api<T = unknown>(path: string, options: Options = {}): Pro
     headers: {
       ...(raw ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...deviceHeader(),
       ...(headers as Record<string, string>),
     },
     body: raw ? (body as BodyInit) : body !== undefined ? JSON.stringify(body) : undefined,
@@ -100,16 +83,19 @@ export type SourceRef = {
 };
 
 export type AskEvents = {
-  onMeta?: (data: { conversation_id: string; sources: SourceRef[]; top_score: number }) => void;
+  onMeta?: (data: { sources: SourceRef[]; top_score: number }) => void;
   onDelta?: (text: string) => void;
   onDone?: (data: Record<string, unknown>) => void;
   onError?: (message: string) => void;
 };
 
+/** One earlier turn, resent so follow-up questions have context. */
+export type HistoryTurn = { role: "user" | "assistant"; content: string };
+
 /** POST /chat/ask and parse the SSE stream. */
 export async function ask(
   question: string,
-  conversationId: string | null,
+  history: HistoryTurn[],
   events: AskEvents,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -119,9 +105,8 @@ export async function ask(
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...deviceHeader(),
     },
-    body: JSON.stringify({ question, conversation_id: conversationId }),
+    body: JSON.stringify({ question, history }),
     signal,
   });
 

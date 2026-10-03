@@ -119,31 +119,6 @@ class ChunkRecord:
 
 
 @dataclass
-class ConversationRecord:
-    id: str = field(default_factory=new_id)
-    user_id: str = ""
-    title: str = "New question"
-    created_at: datetime = field(default_factory=utcnow)
-    updated_at: datetime = field(default_factory=utcnow)
-
-
-@dataclass
-class MessageRecord:
-    id: str = field(default_factory=new_id)
-    conversation_id: str = ""
-    role: str = "user"
-    content: str = ""
-    answered: bool = True
-    escalated: bool = False
-    escalation_reason: str = ""
-    citations_json: str = "[]"
-    top_score: float = 0.0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    created_at: datetime = field(default_factory=utcnow)
-
-
-@dataclass
 class AuditEntry:
     id: str = field(default_factory=new_id)
     at: datetime = field(default_factory=utcnow)
@@ -198,22 +173,15 @@ class Repo(Protocol):
         """Every chunk of every active document — the retrieval index input."""
         ...
 
-    # -------------------------------------------------------- conversations
-    def get_conversation(self, conversation_id: str) -> ConversationRecord | None: ...
-    def list_conversations(self, user_id: str, limit: int = 50) -> list[ConversationRecord]: ...
-    def create_conversation(self, conversation: ConversationRecord) -> ConversationRecord: ...
-    def save_conversation(self, conversation: ConversationRecord) -> None: ...
-    def delete_conversation(self, conversation_id: str) -> None: ...
-
-    def list_messages(self, conversation_id: str) -> list[MessageRecord]: ...
-    def add_message(self, message: MessageRecord) -> MessageRecord: ...
-
     # ---------------------------------------------------------------- audit
     def append_audit(self, entry: AuditEntry) -> None: ...
     def list_audit(self, limit: int = 200, action: str = "") -> list[AuditEntry]: ...
 
     # ----------------------------------------------------------- statistics
-    def count_messages_since(self, since: datetime, escalated: bool) -> int: ...
+    # Chat history is session-only and never written here, so "how many
+    # questions were answered vs. escalated" is read from the audit log
+    # instead of a messages table.
+    def count_questions_since(self, since: datetime, escalated: bool) -> int: ...
     def coverage_gaps(self, since: datetime, limit: int = 15) -> list[tuple[str, int]]: ...
 
     # ----------------------------------------------------------- rate limit

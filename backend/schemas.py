@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -111,9 +112,19 @@ class DocumentUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class HistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
-    conversation_id: str | None = None
+    # The last few turns of this conversation, held by the browser for the
+    # life of the tab and resent with each question — chat history is
+    # session-only and is never written to the database. Capped well above
+    # what the model actually uses (the last 6) so a stray client can't pad
+    # the request without limit.
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=20)
 
 
 class CitationOut(BaseModel):

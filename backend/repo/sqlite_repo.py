@@ -17,11 +17,9 @@ from database import Base, SessionLocal, engine, run_migrations
 from .base import (
     AuditEntry,
     ChunkRecord,
-    ConversationRecord,
     DocumentRecord,
     EmailTaken,
     InviteRecord,
-    MessageRecord,
     UserRecord,
     as_naive_utc,
 )
@@ -59,24 +57,6 @@ def _document(row: m.Document) -> DocumentRecord:
         pii_flags=row.pii_flags, uploaded_by=row.uploaded_by,
         created_at=as_naive_utc(row.created_at),
         updated_at=as_naive_utc(row.updated_at),
-    )
-
-
-def _conversation(row: m.Conversation) -> ConversationRecord:
-    return ConversationRecord(
-        id=row.id, user_id=row.user_id, title=row.title,
-        created_at=as_naive_utc(row.created_at),
-        updated_at=as_naive_utc(row.updated_at),
-    )
-
-
-def _message(row: m.Message) -> MessageRecord:
-    return MessageRecord(
-        id=row.id, conversation_id=row.conversation_id, role=row.role,
-        content=row.content, answered=row.answered, escalated=row.escalated,
-        escalation_reason=row.escalation_reason, citations_json=row.citations_json,
-        top_score=row.top_score, input_tokens=row.input_tokens,
-        output_tokens=row.output_tokens, created_at=as_naive_utc(row.created_at),
     )
 
 
@@ -268,65 +248,6 @@ class SqliteRepo:
                 for c, d in rows
             ]
 
-    # -------------------------------------------------------- conversations
-
-    def get_conversation(self, conversation_id: str) -> ConversationRecord | None:
-        with SessionLocal() as s:
-            row = s.get(m.Conversation, conversation_id)
-            return _conversation(row) if row else None
-
-    def list_conversations(self, user_id: str, limit: int = 50) -> list[ConversationRecord]:
-        with SessionLocal() as s:
-            rows = (s.query(m.Conversation).filter(m.Conversation.user_id == user_id)
-                    .order_by(m.Conversation.updated_at.desc()).limit(limit).all())
-            return [_conversation(r) for r in rows]
-
-    def create_conversation(self, conversation: ConversationRecord) -> ConversationRecord:
-        with SessionLocal() as s:
-            s.add(m.Conversation(
-                id=conversation.id, user_id=conversation.user_id,
-                title=conversation.title, created_at=conversation.created_at,
-                updated_at=conversation.updated_at,
-            ))
-            s.commit()
-        return conversation
-
-    def save_conversation(self, conversation: ConversationRecord) -> None:
-        with SessionLocal() as s:
-            row = s.get(m.Conversation, conversation.id)
-            if row:
-                row.title = conversation.title
-                row.updated_at = conversation.updated_at
-                s.commit()
-
-    def delete_conversation(self, conversation_id: str) -> None:
-        with SessionLocal() as s:
-            s.query(m.Message).filter(m.Message.conversation_id == conversation_id).delete()
-            row = s.get(m.Conversation, conversation_id)
-            if row:
-                s.delete(row)
-            s.commit()
-
-    def list_messages(self, conversation_id: str) -> list[MessageRecord]:
-        with SessionLocal() as s:
-            rows = (s.query(m.Message)
-                    .filter(m.Message.conversation_id == conversation_id)
-                    .order_by(m.Message.created_at).all())
-            return [_message(r) for r in rows]
-
-    def add_message(self, message: MessageRecord) -> MessageRecord:
-        with SessionLocal() as s:
-            s.add(m.Message(
-                id=message.id, conversation_id=message.conversation_id,
-                role=message.role, content=message.content, answered=message.answered,
-                escalated=message.escalated, escalation_reason=message.escalation_reason,
-                citations_json=message.citations_json, top_score=message.top_score,
-                input_tokens=message.input_tokens, output_tokens=message.output_tokens,
-                created_at=message.created_at,
-            ))
-            s.commit()
-        return message
-
     # ---------------------------------------------------------------- audit
 
     def append_audit(self, entry: AuditEntry) -> None:
@@ -347,12 +268,14 @@ class SqliteRepo:
 
     # ----------------------------------------------------------- statistics
 
-    def count_messages_since(self, since: datetime, escalated: bool) -> int:
+    def count_questions_since(self, since: datetime, escalated: bool) -> int:
+        """Answered vs. escalated questions, read from the audit log — chat
+        history itself is session-only and never reaches this database."""
+        action = "question_escalated" if escalated else "question_answered"
         with SessionLocal() as s:
-            return (s.query(func.count(m.Message.id))
-                    .filter(m.Message.role == "assistant",
-                            m.Message.escalated.is_(escalated),
-                            m.Message.created_at >= since).scalar() or 0)
+            return (s.query(func.count(m.AuditLog.id))
+                    .filter(m.AuditLog.action == action,
+                            m.AuditLog.at >= since).scalar() or 0)
 
     def coverage_gaps(self, since: datetime, limit: int = 15) -> list[tuple[str, int]]:
         with SessionLocal() as s:

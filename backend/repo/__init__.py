@@ -22,10 +22,8 @@ import os
 from .base import (  # noqa: F401
     AuditEntry,
     ChunkRecord,
-    ConversationRecord,
     DocumentRecord,
     InviteRecord,
-    MessageRecord,
     Repo,
     UserRecord,
 )

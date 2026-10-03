@@ -125,35 +125,10 @@ CREATE INDEX IF NOT EXISTS chunks_visible_idx ON chunks (visibility) WHERE docum
 -- Trigram index over headings, for matching a section the user half-remembers.
 CREATE INDEX IF NOT EXISTS chunks_heading_trgm_idx ON chunks USING GIN (heading gin_trgm_ops);
 
--- ---------------------------------------------------------------- conversations
-CREATE TABLE IF NOT EXISTS conversations (
-    id         TEXT PRIMARY KEY,
-    user_id    TEXT NOT NULL,
-    title      TEXT NOT NULL DEFAULT 'New question',
-    created_at TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-    updated_at TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
-);
-
-CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations (user_id, updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id                TEXT PRIMARY KEY,
-    conversation_id   TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
-    role              TEXT NOT NULL DEFAULT 'user',
-    content           TEXT NOT NULL DEFAULT '',
-    answered          BOOLEAN NOT NULL DEFAULT TRUE,
-    escalated         BOOLEAN NOT NULL DEFAULT FALSE,
-    escalation_reason TEXT NOT NULL DEFAULT '',
-    citations_json    TEXT NOT NULL DEFAULT '[]',
-    top_score         DOUBLE PRECISION NOT NULL DEFAULT 0,
-    input_tokens      INTEGER NOT NULL DEFAULT 0,
-    output_tokens     INTEGER NOT NULL DEFAULT 0,
-    created_at        TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
-);
-
-CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at);
--- count_messages_since / coverage_gaps scan by time and escalation.
-CREATE INDEX IF NOT EXISTS messages_stats_idx ON messages (created_at, escalated);
+-- Chat history is session-only: the browser holds the last few turns and
+-- resends them with each question. Nothing about a conversation is written
+-- here — question/answer counts and coverage_gaps below both read the audit
+-- log instead, which already records every question regardless.
 
 -- ---------------------------------------------------------------- audit
 CREATE TABLE IF NOT EXISTS audit (

@@ -6,10 +6,6 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from config import settings
-import hashlib
-import re
-import secrets
-
 from models import ROLE_ADMIN, ROLE_LEADERSHIP, ROLE_TEAM
 from repo import get_repo
 from repo.base import UserRecord
@@ -75,25 +71,6 @@ def enforce_rate_limit(user: UserRecord) -> None:
             status_code=429,
             detail=f"You've reached the limit of {limit} questions this hour. Try again shortly.",
         )
-
-
-_DEVICE_ID = re.compile(r"^[A-Za-z0-9-]{16,64}$")
-
-
-def history_owner(user: UserRecord, request: Request) -> str:
-    """Whose chat history a request reads and writes.
-
-    A personal account owns its own. The team login is shared, so its history
-    is scoped to the browser that sent X-Device-Id: coworkers on other devices
-    never see each other's questions. Without a valid id there is no device to
-    scope to, and the request gets a history no one else can address.
-    """
-    if user.role != ROLE_TEAM:
-        return user.id
-    device = request.headers.get("X-Device-Id", "")
-    if not _DEVICE_ID.match(device):
-        device = "anonymous-" + secrets.token_hex(16)
-    return hashlib.sha256(f"{user.id}:{device}".encode()).hexdigest()[:32]
 
 
 def get_request(request: Request) -> Request:
