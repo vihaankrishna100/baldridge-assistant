@@ -30,6 +30,14 @@ def _attachment(filename: str) -> str:
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
+def _upgrade_storage() -> None:
+    """Applies pending storage-saving schema changes on databases that skip
+    the startup bootstrap (production). A no-op after the first call."""
+    store = get_repo()
+    if hasattr(store, "upgrade_if_needed"):
+        store.upgrade_if_needed()
+
+
 def _chunks_for(doc: DocumentRecord, proto_chunks) -> list[ChunkRecord]:
     return [
         ChunkRecord(
@@ -66,6 +74,7 @@ def list_documents(
 def storage(_: UserRecord = Depends(require_leadership)):
     """How full the database is, for whoever uploads documents. None when the
     store cannot measure itself (SQLite, Firestore)."""
+    _upgrade_storage()
     store = get_repo()
     if not hasattr(store, "storage_bytes"):
         return None
@@ -87,6 +96,7 @@ async def upload_document(
     replaces: str = Form(""),
     user: UserRecord = Depends(require_leadership),
 ):
+    _upgrade_storage()
     docs = get_docstore()
 
     if visibility not in VISIBILITIES:
@@ -229,6 +239,7 @@ def delete_document(
     request: Request,
     user: UserRecord = Depends(require_leadership),
 ):
+    _upgrade_storage()
     docs = get_docstore()
     doc = docs.get_document(document_id)
     if doc is None:

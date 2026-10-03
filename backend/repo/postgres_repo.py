@@ -593,6 +593,25 @@ class PostgresRepo:
             # lasts well under a second.
             with get_pool().connection() as c:  # pool connections autocommit
                 c.execute("VACUUM FULL chunks")
+        type(self)._schema_current = True
+
+    _schema_current = False
+
+    def upgrade_if_needed(self) -> None:
+        """Production sets SKIP_BOOTSTRAP, so a schema change would never reach
+        it. Document uploads, deletes and the storage meter call this instead:
+        one cheap lookup, and the full bootstrap only on a database still in
+        the old layout. Remembered per process after the first check."""
+        if type(self)._schema_current:
+            return
+        with get_pool().connection() as c:
+            stale = c.execute(
+                """SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'chunks' AND column_name = 'search_vector'"""
+            ).fetchone() is not None
+        if stale:
+            self.bootstrap()
+        type(self)._schema_current = True
 
     # ------------------------------------------------- document bytes (blobs)
 
