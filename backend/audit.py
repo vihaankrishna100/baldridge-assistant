@@ -26,7 +26,10 @@ RETENTION_KEY = "audit_retention_days"
 DEFAULT_RETENTION_DAYS = 7
 RETENTION_CHOICES = (1, 3, 7, 14, 30, 90, 0)
 _PRUNE_EVERY = 3600.0
-_last_prune = 0.0
+# None until the first prune. time.monotonic() counts from boot, and a
+# serverless instance rarely lives an hour, so starting this at 0.0 meant
+# "monotonic() - 0 < 3600" on every call: production never pruned once.
+_last_prune: float | None = None
 _prune_lock = threading.Lock()
 
 
@@ -54,9 +57,10 @@ def prune(force: bool = False) -> int:
     if not hasattr(store, "delete_audit_before"):
         return 0
     with _prune_lock:
-        if not force and time.monotonic() - _last_prune < _PRUNE_EVERY:
+        now = time.monotonic()
+        if not force and _last_prune is not None and now - _last_prune < _PRUNE_EVERY:
             return 0
-        _last_prune = time.monotonic()
+        _last_prune = now
     days = retention_days()
     if days <= 0:
         return 0
