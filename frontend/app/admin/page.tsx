@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
 import StorageMeter, { type Storage } from "@/components/StorageMeter";
 import TwoStepSetup from "@/components/TwoStepSetup";
@@ -32,10 +32,48 @@ type Settings = {
   retrieval_min_score: number;
   max_queries_per_hour: number;
   storage: string;
+  email_enabled?: boolean;
 };
 
 type Invite = { id: string; email: string; role: string; expires_at: string; expired: boolean };
-type InviteResult = { email: string; invite_url: string; emailed: boolean };
+type InviteResult = { email: string; invite_url: string; emailed: boolean; expires_at: string };
+
+// navigator.clipboard only exists on https and localhost, and some browsers
+// refuse it without a recent click. The hidden-textarea copy is the fallback.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.setAttribute("readonly", "");
+    el.style.position = "fixed";
+    el.style.opacity = "0";
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(el);
+    return ok;
+  }
+}
+
+function inviteMessage(orgName: string, inv: InviteResult): string {
+  const org = orgName || "Bald Ridge Lodge";
+  const until = new Date(inv.expires_at).toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+  });
+  return (
+    `Hi,\n\nYou've been invited to the ${org} Assistant, which answers questions from ` +
+    `the Lodge's own policies and procedures.\n\n` +
+    `Create your password here (the link works once and expires ${until}):\n` +
+    `${inv.invite_url}\n\n` +
+    `After setting a password you'll be asked to scan a QR code with an authenticator ` +
+    `app on your phone (Google Authenticator or Microsoft Authenticator), then enter ` +
+    `the 6-digit code it shows. Install one before you start.\n`
+  );
+}
 type AuditRow = {
   id: number;
   at: string;
@@ -69,6 +107,8 @@ export default function AdminPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("staff");
   const [inviteResult, setInviteResult] = useState<InviteResult | null>(null);
+  const [copied, setCopied] = useState<"" | "link" | "message" | "failed">("");
+  const resultRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const [twoStepDone, setTwoStepDone] = useState(false);
 
@@ -126,7 +166,7 @@ export default function AdminPage() {
         method: "POST",
         body: { email: inviteEmail, role: inviteRole },
       });
-      setInviteResult(res);
+      showInvite(res);
       setInviteEmail("");
       await load();
     } catch (err) {
@@ -134,11 +174,28 @@ export default function AdminPage() {
     }
   };
 
+  const showInvite = (res: InviteResult) => {
+    setInviteResult(res);
+    setCopied("");
+    // The list sits below the box, so after "New link" on a row the new
+    // link would otherwise appear off-screen above the button pressed.
+    requestAnimationFrame(() =>
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    );
+  };
+
+  const copy = async (what: "link" | "message") => {
+    if (!inviteResult) return;
+    const text =
+      what === "link" ? inviteResult.invite_url : inviteMessage(settings?.org_name ?? "", inviteResult);
+    setCopied((await copyText(text)) ? what : "failed");
+  };
+
   const resendInvite = async (inv: Invite) => {
     setError("");
     try {
       const res = await api<InviteResult>(`/admin/invites/${inv.id}/resend`, { method: "POST" });
-      setInviteResult(res);
+      showInvite(res);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not resend the invitation.");
@@ -326,7 +383,10 @@ export default function AdminPage() {
             <h2 className="text-sm font-semibold text-text">Invite a team member</h2>
             <p className="mt-1 mb-4 text-sm text-muted">
               Their own account, with their own history and two-factor. Use this for leadership,
-              administrators, and anyone who should be able to see leadership-only documents.
+              administrators, and anyone who should be able to see leadership-only documents.{" "}
+              {settings?.email_enabled
+                ? "The link is emailed to them, and shown here too."
+                : "You'll get a link to copy and send them yourself, by email or text."}
             </p>
             <form onSubmit={createInvite} className="flex flex-wrap gap-2.5">
               <input
@@ -352,22 +412,49 @@ export default function AdminPage() {
             </form>
 
             {inviteResult && (
-              <div className="mt-4 rounded-xl border border-mint/40 bg-mint/8 p-3.5">
-                <p className="text-xs text-mint">
+              <div ref={resultRef} className="mt-4 rounded-xl border border-mint/40 bg-mint/8 p-3.5">
+                <p className="text-sm font-medium text-mint">
                   {inviteResult.emailed
-                    ? `Emailed to ${inviteResult.email}. The link is also here if they can't find it. `
-                    : `Send this link to ${inviteResult.email}. `}
-                  It expires in 7 days and is shown only once. Nothing stores the link itself.
+                    ? `Emailed to ${inviteResult.email}`
+                    : `Now send this link to ${inviteResult.email}`}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-muted">
+                  {inviteResult.emailed
+                    ? "The link is also here in case they can't find the email. "
+                    : "Copy it into an email or text from your own account. "}
+                  It works once and expires in 7 days. Copy it now: it can&apos;t be shown again
+                  after you leave this page. If it&apos;s lost, use &ldquo;New link&rdquo; below.
                 </p>
                 <code className="mt-2 block break-all rounded-lg bg-ink/60 p-2.5 font-mono text-xs text-cyan">
                   {inviteResult.invite_url}
                 </code>
-                <button
-                  onClick={() => void navigator.clipboard.writeText(inviteResult.invite_url)}
-                  className="mt-2 rounded-lg border border-line px-3 py-1 text-xs text-muted hover:text-cyan"
-                >
-                  Copy
-                </button>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => void copy("link")}
+                    className="rounded-lg bg-cyan px-3 py-1 text-xs font-semibold text-ink hover:brightness-110"
+                  >
+                    {copied === "link" ? "Link copied ✓" : "Copy link"}
+                  </button>
+                  <button
+                    onClick={() => void copy("message")}
+                    className="rounded-lg border border-line px-3 py-1 text-xs text-muted hover:text-cyan"
+                  >
+                    {copied === "message" ? "Message copied ✓" : "Copy a ready-to-send message"}
+                  </button>
+                  <a
+                    href={`mailto:${encodeURIComponent(inviteResult.email)}?subject=${encodeURIComponent(
+                      `Your ${settings?.org_name || "Bald Ridge Lodge"} Assistant invitation`,
+                    )}&body=${encodeURIComponent(inviteMessage(settings?.org_name ?? "", inviteResult))}`}
+                    className="rounded-lg border border-line px-3 py-1 text-xs text-muted hover:text-cyan"
+                  >
+                    Open in my email
+                  </a>
+                  {copied === "failed" && (
+                    <span className="text-xs text-rose">
+                      Couldn&apos;t copy. Select the link above and copy it by hand.
+                    </span>
+                  )}
+                </div>
               </div>
             )}
 
@@ -393,9 +480,10 @@ export default function AdminPage() {
                     </span>
                     <button
                       onClick={() => void resendInvite(inv)}
+                      title="Makes a fresh link to copy and send. Any earlier link stops working."
                       className={`text-xs ${inv.expired ? "text-cyan hover:brightness-110" : "text-faint hover:text-cyan"}`}
                     >
-                      {inv.expired ? "Send a new link" : "Resend"}
+                      New link
                     </button>
                     <button
                       onClick={async () => {

@@ -404,6 +404,8 @@ def read_settings(_: UserRecord = Depends(require_admin)):
         "retrieval_min_score": settings.retrieval_min_score,
         "max_queries_per_hour": settings.max_queries_per_hour,
         "max_upload_mb": settings.max_upload_mb,
+        # Whether invites and sign-in codes can go out by email (SMTP set).
+        "email_enabled": settings.email_codes_available,
         "storage": type(get_docstore()).__name__,
         "repo": type(get_repo()).__name__,
     }
