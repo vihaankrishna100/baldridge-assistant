@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 import audit
 import llm
+import permissions as perms
 from config import settings
 from deps import require_admin
 from models import ROLE_TEAM, ROLES
@@ -433,3 +434,64 @@ def put_model(payload: ModelIn, request: Request, user: UserRecord = Depends(req
               detail=f"{before} -> {after}" + ("" if model else " (server default)"),
               request=request)
     return {"model": after, "model_source": "admin" if model else "server"}
+
+
+# ------------------------------------------------------------ permissions
+
+
+def _permissions_payload() -> dict:
+    current = perms.matrix()
+    return {
+        "permissions": [
+            {"id": k, "label": label, "description": desc}
+            for k, (label, desc) in perms.PERMISSIONS.items()
+        ],
+        "roles": [{"id": r, "label": label} for r, label in perms.EDITABLE_ROLES.items()],
+        "matrix": {r: sorted(current.get(r, set())) for r in perms.EDITABLE_ROLES},
+        "defaults": {r: sorted(p) for r, p in perms.DEFAULTS.items()},
+    }
+
+
+@router.get("/permissions")
+def get_permissions(_: UserRecord = Depends(require_admin)):
+    return _permissions_payload()
+
+
+class PermissionsIn(BaseModel):
+    matrix: dict[str, list[str]]
+
+
+def _describe_changes(before: dict[str, set[str]], after: dict[str, set[str]]) -> str:
+    parts = []
+    for role, label in perms.EDITABLE_ROLES.items():
+        added = after.get(role, set()) - before.get(role, set())
+        removed = before.get(role, set()) - after.get(role, set())
+        for p in sorted(added):
+            parts.append(f"{label} +{perms.PERMISSIONS[p][0]}")
+        for p in sorted(removed):
+            parts.append(f"{label} -{perms.PERMISSIONS[p][0]}")
+    return "; ".join(parts) or "no change"
+
+
+@router.put("/permissions")
+def put_permissions(payload: PermissionsIn, request: Request,
+                    user: UserRecord = Depends(require_admin)):
+    unknown_roles = set(payload.matrix) - set(perms.EDITABLE_ROLES)
+    unknown_perms = {p for ps in payload.matrix.values() for p in ps} - set(perms.PERMISSIONS)
+    if unknown_roles or unknown_perms:
+        raise HTTPException(status_code=400, detail="Unknown role or permission.")
+    before = perms.matrix()
+    after = perms.save(payload.matrix)
+    audit.log("permissions_changed", user=user, detail=_describe_changes(before, after)[:2000],
+              request=request)
+    return _permissions_payload()
+
+
+@router.post("/permissions/reset")
+def reset_permissions(request: Request, user: UserRecord = Depends(require_admin)):
+    before = perms.matrix()
+    after = perms.reset()
+    audit.log("permissions_changed", user=user,
+              detail="reset to defaults: " + _describe_changes(before, after)[:1900],
+              request=request)
+    return _permissions_payload()

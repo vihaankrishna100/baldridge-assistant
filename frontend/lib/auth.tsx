@@ -13,7 +13,30 @@ export type User = {
   twofa_method?: "" | "app" | "email";
   is_active: boolean;
   last_login_at?: string | null;
+  permissions?: Permission[];
 };
+
+/** Set per role on the Admin page; the server enforces them on every request. */
+export type Permission =
+  | "ask"
+  | "see_leadership_docs"
+  | "view_documents"
+  | "download"
+  | "manage_documents";
+
+export function can(user: User | null | undefined, permission: Permission): boolean {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  return (user.permissions ?? []).includes(permission);
+}
+
+/** Where to send someone after sign-in: the first page their role can use. */
+export function homePath(user: User | null | undefined): string {
+  if (can(user, "ask")) return "/ask";
+  if (can(user, "view_documents")) return "/documents";
+  if (user?.role === "admin") return "/admin";
+  return "/no-access";
+}
 
 type AuthValue = {
   user: User | null;
@@ -88,10 +111,15 @@ export function useAuth(): AuthValue {
   return ctx;
 }
 
-/** Redirects to /login when there is no session. */
-export function useRequireAuth(minRole?: "leadership" | "admin") {
+/** Redirects to /login when there is no session, and to the person's home
+ * page when their role lacks what this page needs ("admin" or a permission). */
+export function useRequireAuth(requirement?: "admin" | Permission) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const allowed =
+    !!user &&
+    (requirement === undefined ||
+      (requirement === "admin" ? user.role === "admin" : can(user, requirement)));
 
   useEffect(() => {
     if (loading) return;
@@ -99,10 +127,10 @@ export function useRequireAuth(minRole?: "leadership" | "admin") {
       router.replace("/login");
       return;
     }
-    if (minRole === "admin" && user.role !== "admin") router.replace("/ask");
-    if (minRole === "leadership" && user.role !== "leadership" && user.role !== "admin")
-      router.replace("/ask");
-  }, [user, loading, minRole, router]);
+    if (!allowed) router.replace(homePath(user));
+  }, [user, loading, allowed, router]);
 
-  return { user, loading };
+  // Until the redirect lands, pages render their loading state rather than
+  // flashing content the role can't use.
+  return { user: allowed ? user : null, loading: loading || (!!user && !allowed) };
 }

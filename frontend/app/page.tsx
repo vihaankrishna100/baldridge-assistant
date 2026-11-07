@@ -12,7 +12,7 @@ import {
   LockIcon,
   SearchIcon,
 } from "@/components/Icons";
-import { useAuth } from "@/lib/auth";
+import { homePath, useAuth } from "@/lib/auth";
 
 const PILLARS = [
   {
@@ -68,7 +68,7 @@ export default function LandingPage() {
           <div className="ml-auto flex items-center gap-3 md:ml-7">
             <ThemeToggle />
             <Link
-              href={user ? "/ask" : "/login"}
+              href={user ? homePath(user) : "/login"}
               className="group flex items-center gap-2 rounded-xl bg-cyan px-4 py-2 text-sm font-semibold text-ink transition hover:brightness-110"
             >
               <span className="hidden sm:inline">
@@ -120,7 +120,7 @@ export default function LandingPage() {
 
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <Link
-                href={user ? "/ask" : "/login"}
+                href={user ? homePath(user) : "/login"}
                 className="group flex items-center gap-2 rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-ink transition hover:brightness-110"
               >
                 {user ? "Open the assistant" : "Sign in to ask a question"}

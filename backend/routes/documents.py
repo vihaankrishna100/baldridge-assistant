@@ -8,9 +8,10 @@ from fastapi.responses import Response
 
 import audit
 from config import settings
-from deps import current_user, require_leadership
+import permissions as perms
+from deps import current_user, require_permission
 from docstore import DocumentMissing, DuplicateDocument, GitHubDocStore, get_docstore
-from models import VISIBILITIES, VISIBILITY_STAFF, visible_tiers_for_role
+from models import VISIBILITIES, VISIBILITY_STAFF
 from rag import redact
 from rag.chunker import chunk_pages
 from rag.extract import ExtractionError, extract
@@ -20,6 +21,9 @@ from repo.base import ChunkRecord, DocumentRecord, UserRecord, utcnow
 from schemas import DocumentOut, DocumentUpdate
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+_manager = require_permission(
+    perms.MANAGE_DOCUMENTS, "Your role can't upload or change documents.")
 
 
 def _attachment(filename: str) -> str:
@@ -58,10 +62,11 @@ def _chunks_for(doc: DocumentRecord, proto_chunks) -> list[ChunkRecord]:
 @router.get("", response_model=list[DocumentOut])
 def list_documents(
     include_inactive: bool = False,
-    user: UserRecord = Depends(current_user),
+    user: UserRecord = Depends(require_permission(
+        perms.VIEW_DOCUMENTS, "Your role can't browse the document library.")),
 ):
-    tiers = visible_tiers_for_role(user.role)
-    show_retired = include_inactive and user.role != "staff"
+    tiers = perms.visible_tiers(user.role)
+    show_retired = include_inactive and perms.can(user.role, perms.MANAGE_DOCUMENTS)
     docs = [
         d
         for d in get_docstore().list_documents(include_inactive=show_retired)
@@ -71,7 +76,7 @@ def list_documents(
 
 
 @router.get("/storage")
-def storage(_: UserRecord = Depends(require_leadership)):
+def storage(_: UserRecord = Depends(_manager)):
     """How full the database is, for whoever uploads documents. None when the
     store cannot measure itself (SQLite, Firestore)."""
     _upgrade_storage()
@@ -94,14 +99,14 @@ async def upload_document(
     category: str = Form("General"),
     visibility: str = Form(VISIBILITY_STAFF),
     replaces: str = Form(""),
-    user: UserRecord = Depends(require_leadership),
+    user: UserRecord = Depends(_manager),
 ):
     _upgrade_storage()
     docs = get_docstore()
 
     if visibility not in VISIBILITIES:
         raise HTTPException(status_code=400, detail="Unknown visibility level.")
-    if visibility != VISIBILITY_STAFF and user.role not in ("leadership", "admin"):
+    if visibility != VISIBILITY_STAFF and visibility not in perms.visible_tiers(user.role):
         raise HTTPException(status_code=403, detail="You cannot publish leadership-only documents.")
 
     data = await file.read()
@@ -146,7 +151,7 @@ async def upload_document(
     previous = None
     if replaces:
         previous = docs.get_document(replaces)
-        if previous is None:
+        if previous is None or previous.visibility not in perms.visible_tiers(user.role):
             raise HTTPException(status_code=404, detail="The document being replaced no longer exists.")
         version = previous.version + 1
 
@@ -197,11 +202,12 @@ def update_document(
     document_id: str,
     payload: DocumentUpdate,
     request: Request,
-    user: UserRecord = Depends(require_leadership),
+    user: UserRecord = Depends(_manager),
 ):
     docs = get_docstore()
     doc = docs.get_document(document_id)
-    if doc is None:
+    # A document this role can't see is "not found", same as for downloads.
+    if doc is None or doc.visibility not in perms.visible_tiers(user.role):
         raise HTTPException(status_code=404, detail="Document not found.")
 
     changes = []
@@ -214,6 +220,8 @@ def update_document(
     if payload.visibility is not None:
         if payload.visibility not in VISIBILITIES:
             raise HTTPException(status_code=400, detail="Unknown visibility level.")
+        if payload.visibility not in perms.visible_tiers(user.role):
+            raise HTTPException(status_code=403, detail="You cannot publish leadership-only documents.")
         doc.visibility = payload.visibility
         changes.append(f"visibility={payload.visibility}")
     if payload.is_active is not None:
@@ -237,12 +245,12 @@ def update_document(
 def delete_document(
     document_id: str,
     request: Request,
-    user: UserRecord = Depends(require_leadership),
+    user: UserRecord = Depends(_manager),
 ):
     _upgrade_storage()
     docs = get_docstore()
     doc = docs.get_document(document_id)
-    if doc is None:
+    if doc is None or doc.visibility not in perms.visible_tiers(user.role):
         raise HTTPException(status_code=404, detail="Document not found.")
     title = doc.title
 
@@ -256,13 +264,14 @@ def delete_document(
 def download_document(
     document_id: str,
     request: Request,
-    user: UserRecord = Depends(current_user),
+    user: UserRecord = Depends(require_permission(
+        perms.DOWNLOAD, "Your role can't download original files.")),
 ):
     docs = get_docstore()
     doc = docs.get_document(document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found.")
-    if doc.visibility not in visible_tiers_for_role(user.role):
+    if doc.visibility not in perms.visible_tiers(user.role):
         # Same 404 as a missing document — a 403 would confirm it exists.
         audit.log("document_access_denied", user=user, target=doc.id, request=request)
         raise HTTPException(status_code=404, detail="Document not found.")
@@ -309,7 +318,7 @@ def _resync_search_copy(docs: GitHubDocStore) -> None:
 
 
 @router.post("/reindex")
-def reindex(request: Request, user: UserRecord = Depends(require_leadership)):
+def reindex(request: Request, user: UserRecord = Depends(_manager)):
     docs = get_docstore()
     if isinstance(docs, GitHubDocStore):
         _resync_search_copy(docs)

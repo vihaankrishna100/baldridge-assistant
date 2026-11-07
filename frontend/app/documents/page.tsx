@@ -5,7 +5,7 @@ import AppShell from "@/components/AppShell";
 import { UploadIcon } from "@/components/Icons";
 import StorageMeter, { type Storage } from "@/components/StorageMeter";
 import { API_BASE, ApiError, api, getToken } from "@/lib/api";
-import { useRequireAuth } from "@/lib/auth";
+import { can, useRequireAuth } from "@/lib/auth";
 
 type Doc = {
   id: string;
@@ -34,7 +34,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function DocumentsPage() {
-  const { user, loading } = useRequireAuth();
+  const { user, loading } = useRequireAuth("view_documents");
   const [docs, setDocs] = useState<Doc[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -48,7 +48,9 @@ export default function DocumentsPage() {
   const [replaces, setReplaces] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const canManage = user?.role === "leadership" || user?.role === "admin";
+  const canManage = can(user, "manage_documents");
+  const canDownload = can(user, "download");
+  const canLeadership = can(user, "see_leadership_docs");
   const [storage, setStorage] = useState<Storage | null>(null);
 
   // Re-read whenever the library changes, so an upload or delete shows up.
@@ -231,7 +233,7 @@ export default function DocumentsPage() {
                 className="w-full rounded-xl border border-line bg-ink/60 px-3.5 py-2.5 text-sm text-text outline-none focus:border-cyan/50"
               >
                 <option value="staff">All staff</option>
-                <option value="leadership">Leadership only</option>
+                {canLeadership && <option value="leadership">Leadership only</option>}
               </select>
             </label>
 
@@ -342,12 +344,14 @@ export default function DocumentsPage() {
                   </div>
 
                   <div className="flex gap-1.5">
-                    <button
-                      onClick={() => void download(doc)}
-                      className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:text-cyan"
-                    >
-                      Download
-                    </button>
+                    {canDownload && (
+                      <button
+                        onClick={() => void download(doc)}
+                        className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:text-cyan"
+                      >
+                        Download
+                      </button>
+                    )}
                     {canManage && (
                       <>
                         <button

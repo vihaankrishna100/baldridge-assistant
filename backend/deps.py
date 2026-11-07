@@ -8,7 +8,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import hashlib
 
 from config import settings
-from models import ROLE_ADMIN, ROLE_LEADERSHIP, ROLE_TEAM
+import permissions
+from models import ROLE_ADMIN, ROLE_TEAM
 from repo import get_repo
 from repo.base import UserRecord
 from security import decode_token
@@ -52,10 +53,16 @@ def current_user(
     return user
 
 
-def require_leadership(user: UserRecord = Depends(current_user)) -> UserRecord:
-    if user.role not in (ROLE_LEADERSHIP, ROLE_ADMIN):
-        raise HTTPException(status_code=403, detail="Leadership access required")
-    return user
+def require_permission(permission: str, detail: str = "Your role doesn't allow this."):
+    """Route dependency: the signed-in user's role must hold `permission`.
+    Which roles do is set on the Admin page (see permissions.py)."""
+
+    def check(user: UserRecord = Depends(current_user)) -> UserRecord:
+        if not permissions.can(user.role, permission):
+            raise HTTPException(status_code=403, detail=detail)
+        return user
+
+    return check
 
 
 def require_admin(user: UserRecord = Depends(current_user)) -> UserRecord:

@@ -5,12 +5,12 @@ import { usePathname } from "next/navigation";
 import Logo from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
 import { AdminIcon, AskIcon, DocumentsIcon, SignOutIcon } from "@/components/Icons";
-import { useAuth } from "@/lib/auth";
+import { can, useAuth, type Permission } from "@/lib/auth";
 
-const NAV = [
-  { href: "/ask", label: "Ask", icon: AskIcon, adminOnly: false },
-  { href: "/documents", label: "Documents", icon: DocumentsIcon, adminOnly: false },
-  { href: "/admin", label: "Admin", icon: AdminIcon, adminOnly: true },
+const NAV: { href: string; label: string; icon: typeof AskIcon; needs: "admin" | Permission }[] = [
+  { href: "/ask", label: "Ask", icon: AskIcon, needs: "ask" },
+  { href: "/documents", label: "Documents", icon: DocumentsIcon, needs: "view_documents" },
+  { href: "/admin", label: "Admin", icon: AdminIcon, needs: "admin" },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -24,7 +24,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
   const pathname = usePathname();
 
-  const visible = NAV.filter((item) => !item.adminOnly || user?.role === "admin");
+  const visible = NAV.filter((item) =>
+    item.needs === "admin" ? user?.role === "admin" : can(user, item.needs),
+  );
 
   return (
     <>

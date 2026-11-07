@@ -10,8 +10,8 @@ from fastapi.responses import StreamingResponse
 import audit
 import llm
 from config import settings
-from deps import current_user, enforce_rate_limit
-from models import visible_tiers_for_role
+import permissions as perms
+from deps import enforce_rate_limit, require_permission
 from rag.index import Hit, index
 from repo.base import AuditEntry, UserRecord
 from schemas import AskRequest
@@ -127,7 +127,8 @@ def _finish_escalated(reason: str, user_id: str, user_email: str, ip: str, quest
 def ask(
     payload: AskRequest,
     request: Request,
-    user: UserRecord = Depends(current_user),
+    user: UserRecord = Depends(require_permission(
+        perms.ASK, "Your role can't ask the assistant questions.")),
 ):
     enforce_rate_limit(user)
     question = payload.question.strip()
@@ -148,7 +149,7 @@ def ask(
         # while the index is still warming would look like an empty library.
         reason = "no_documents"
     else:
-        tiers = visible_tiers_for_role(user.role)
+        tiers = perms.visible_tiers(user.role)
         previous = next((t["content"] for t in reversed(history) if t["role"] == "user"), "")
         # Started first so the model call overlaps the searches below.
         expansion = (

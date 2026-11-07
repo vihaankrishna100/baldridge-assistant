@@ -100,7 +100,7 @@ const ACTION_TONE: Record<string, string> = {
 
 export default function AdminPage() {
   const { user, loading } = useRequireAuth("admin");
-  const [tab, setTab] = useState<"overview" | "people" | "audit">("overview");
+  const [tab, setTab] = useState<"overview" | "people" | "permissions" | "audit">("overview");
   const [stats, setStats] = useState<Stats | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -273,7 +273,7 @@ export default function AdminPage() {
       )}
 
       <div className="mb-6 flex gap-1.5">
-        {(["overview", "people", "audit"] as const).map((t) => (
+        {(["overview", "people", "permissions", "audit"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -575,6 +575,8 @@ export default function AdminPage() {
         </div>
       )}
 
+      {tab === "permissions" && <PermissionsEditor />}
+
       {tab === "audit" && (
         <section className="overflow-hidden rounded-2xl border border-line bg-card/50">
           <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-5 py-3.5">
@@ -771,6 +773,178 @@ function TeamLogin({ team, onChange }: { team?: User; onChange: () => Promise<vo
 
       {notice && <p className="mt-3 text-sm text-mint">{notice}</p>}
       {error && <p className="mt-3 text-sm text-rose">{error}</p>}
+    </section>
+  );
+}
+
+type PermissionsData = {
+  permissions: { id: string; label: string; description: string }[];
+  roles: { id: string; label: string }[];
+  matrix: Record<string, string[]>;
+  defaults: Record<string, string[]>;
+};
+
+function PermissionsEditor() {
+  const [data, setData] = useState<PermissionsData | null>(null);
+  const [draft, setDraft] = useState<Record<string, string[]>>({});
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const apply = (d: PermissionsData) => {
+    setData(d);
+    setDraft(d.matrix);
+  };
+
+  useEffect(() => {
+    api<PermissionsData>("/admin/permissions")
+      .then(apply)
+      .catch((e) =>
+        setMessage({ text: e instanceof Error ? e.message : "Could not load permissions.", ok: false }),
+      );
+  }, []);
+
+  if (!data) {
+    return message ? (
+      <p className="text-sm text-rose">{message.text}</p>
+    ) : (
+      <p className="text-sm text-muted">Loading…</p>
+    );
+  }
+
+  const same = (a: string[] = [], b: string[] = []) =>
+    a.length === b.length && [...a].sort().join() === [...b].sort().join();
+  const dirty = data.roles.some((r) => !same(draft[r.id], data.matrix[r.id]));
+  const isDefault = data.roles.every((r) => same(draft[r.id], data.defaults[r.id]));
+
+  const toggle = (role: string, perm: string) => {
+    setMessage(null);
+    setDraft((d) => {
+      const has = (d[role] ?? []).includes(perm);
+      return { ...d, [role]: has ? d[role].filter((p) => p !== perm) : [...(d[role] ?? []), perm] };
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      apply(await api<PermissionsData>("/admin/permissions", { method: "PUT", body: { matrix: draft } }));
+      setMessage({ text: "Saved. Everyone gets the new permissions within about a minute.", ok: true });
+    } catch (e) {
+      setMessage({ text: e instanceof Error ? e.message : "Could not save.", ok: false });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reset = async () => {
+    if (!confirm("Put every role back to the original permissions?")) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      apply(await api<PermissionsData>("/admin/permissions/reset", { method: "POST" }));
+      setMessage({ text: "Back to the original permissions.", ok: true });
+    } catch (e) {
+      setMessage({ text: e instanceof Error ? e.message : "Could not reset.", ok: false });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-line bg-card/70 p-6">
+      <h2 className="text-sm font-semibold text-text">What each role can see and do</h2>
+      <p className="mt-1 mb-5 text-sm text-muted">
+        Tick what each role is allowed. Administrators always have everything, and only they can
+        open this Admin page. A change applies to everyone with that role within about a minute,
+        and is recorded in the audit log.
+      </p>
+
+      <div className="-mx-2 overflow-x-auto px-2">
+        <table className="w-full min-w-[34rem] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line text-left">
+              <th className="py-2 pr-4 font-medium text-muted">Permission</th>
+              {data.roles.map((r) => (
+                <th key={r.id} className="px-2 py-2 text-center font-medium text-text">
+                  {r.label}
+                </th>
+              ))}
+              <th className="px-2 py-2 text-center font-medium text-faint">Admin</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.permissions.map((p) => (
+              <tr key={p.id} className="border-b border-line-soft/50 align-top">
+                <td className="py-3 pr-4">
+                  <p className="text-text">{p.label}</p>
+                  <p className="mt-0.5 text-xs text-faint">{p.description}</p>
+                </td>
+                {data.roles.map((r) => (
+                  <td key={r.id} className="px-2 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`${r.label}: ${p.label}`}
+                      checked={(draft[r.id] ?? []).includes(p.id)}
+                      onChange={() => toggle(r.id, p.id)}
+                      disabled={saving}
+                      className="h-4 w-4 cursor-pointer accent-cyan"
+                    />
+                  </td>
+                ))}
+                <td className="px-2 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked
+                    disabled
+                    aria-label={`Admin: ${p.label} (always on)`}
+                    className="h-4 w-4 accent-cyan opacity-50"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-2.5">
+        <button
+          onClick={() => void save()}
+          disabled={!dirty || saving}
+          className="rounded-xl bg-cyan px-5 py-2 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-40"
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+        {dirty && (
+          <button
+            onClick={() => {
+              setDraft(data.matrix);
+              setMessage(null);
+            }}
+            disabled={saving}
+            className="rounded-xl border border-line px-4 py-2 text-sm text-muted hover:text-text"
+          >
+            Discard
+          </button>
+        )}
+        {!isDefault && (
+          <button
+            onClick={() => void reset()}
+            disabled={saving}
+            className="rounded-xl border border-line px-4 py-2 text-sm text-muted hover:text-amber"
+          >
+            Reset to original
+          </button>
+        )}
+        {dirty && <span className="text-xs text-amber">Unsaved changes</span>}
+      </div>
+      {message && (
+        <p className={`mt-3 text-sm ${message.ok ? "text-mint" : "text-rose"}`}>{message.text}</p>
+      )}
+      <p className="mt-4 text-xs leading-relaxed text-faint">
+        The team login is the shared account on the People tab. Someone who can manage documents
+        but can&apos;t see leadership-only ones can only change and publish staff-level documents.
+      </p>
     </section>
   );
 }

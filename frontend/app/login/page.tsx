@@ -7,7 +7,7 @@ import Logo from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
 import { LockIcon } from "@/components/Icons";
 import { api } from "@/lib/api";
-import { useAuth, type User } from "@/lib/auth";
+import { homePath, useAuth, type User } from "@/lib/auth";
 
 type LoginResponse = {
   status: "ok" | "2fa_required" | "2fa_setup_required";
@@ -39,7 +39,7 @@ function LoginForm() {
   const finish = (res: LoginResponse) => {
     if (res.status === "ok" && res.access_token && res.user) {
       signIn(res.access_token, res.user);
-      router.push("/ask");
+      router.push(homePath(res.user));
     }
   };
 

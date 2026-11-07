@@ -6,7 +6,7 @@ import Answer from "@/components/Answer";
 import EscalationCard, { type Escalation } from "@/components/EscalationCard";
 import { ArrowIcon, SearchIcon } from "@/components/Icons";
 import { API_BASE, CHAT_KEY, ask, getToken, type HistoryTurn, type SourceRef } from "@/lib/api";
-import { useRequireAuth } from "@/lib/auth";
+import { can, useRequireAuth } from "@/lib/auth";
 
 type Turn =
   | { kind: "question"; id: string; text: string }
@@ -44,7 +44,7 @@ async function downloadDocument(id: string) {
 }
 
 export default function ChatPage() {
-  const { user, loading } = useRequireAuth();
+  const { user, loading } = useRequireAuth("ask");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -360,12 +360,14 @@ export default function ChatPage() {
               </p>
             )}
 
-            <button
-              onClick={() => void downloadDocument(openSource.document_id)}
-              className="mt-4 inline-block rounded-xl border border-line px-4 py-2 text-sm text-cyan transition hover:bg-cyan/10"
-            >
-              Open the full document
-            </button>
+            {can(user, "download") && (
+              <button
+                onClick={() => void downloadDocument(openSource.document_id)}
+                className="mt-4 inline-block rounded-xl border border-line px-4 py-2 text-sm text-cyan transition hover:bg-cyan/10"
+              >
+                Open the full document
+              </button>
+            )}
           </div>
         </div>
       )}

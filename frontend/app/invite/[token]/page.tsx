@@ -4,7 +4,7 @@ import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import ThemeToggle from "@/components/ThemeToggle";
 import { api } from "@/lib/api";
-import { useAuth, type User } from "@/lib/auth";
+import { homePath, useAuth, type User } from "@/lib/auth";
 
 type InviteInfo = { email: string; role: string; org_name: string };
 type SetupResponse = { secret: string; otpauth_uri: string; qr_svg: string };
@@ -52,7 +52,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
       });
       if (res.status === "ok" && res.access_token && res.user) {
         signIn(res.access_token, res.user);
-        router.push("/ask");
+        router.push(homePath(res.user));
         return;
       }
       setChallenge(res.challenge_token ?? "");
@@ -80,7 +80,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
       });
       if (res.access_token && res.user) {
         signIn(res.access_token, res.user);
-        router.push("/ask");
+        router.push(homePath(res.user));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "That code didn't match.");

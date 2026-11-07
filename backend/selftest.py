@@ -23,8 +23,8 @@ from llm import NO_ANSWER, build_user_turn, validate_citations  # noqa: E402
 from models import (  # noqa: E402
     VISIBILITY_LEADERSHIP,
     VISIBILITY_STAFF,
-    visible_tiers_for_role,
 )
+from permissions import visible_tiers as visible_tiers_for_role  # noqa: E402
 from repo.base import ChunkRecord, DocumentRecord  # noqa: E402
 from repo.sqlite_repo import SqliteRepo  # noqa: E402
 from rag.chunker import chunk_pages  # noqa: E402

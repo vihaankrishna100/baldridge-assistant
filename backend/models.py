@@ -41,10 +41,7 @@ ROLES = (ROLE_STAFF, ROLE_LEADERSHIP, ROLE_ADMIN)
 ROLE_TEAM = "team"
 
 
-def visible_tiers_for_role(role: str) -> list[str]:
-    if role in (ROLE_LEADERSHIP, ROLE_ADMIN):
-        return [VISIBILITY_STAFF, VISIBILITY_LEADERSHIP]
-    return [VISIBILITY_STAFF]
+# Which roles see which visibilities is configurable: see permissions.py.
 
 
 class User(Base):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, EmailStr, Field, PlainSerializer
+from pydantic import BaseModel, EmailStr, Field, PlainSerializer, model_validator
 
 
 def utc_iso(value: datetime) -> str:
@@ -77,8 +77,19 @@ class UserOut(BaseModel):
     is_active: bool
     last_login_at: UtcDatetime | None = None
     created_at: UtcDatetime
+    # What this person's role may do, so the site can hide what they can't.
+    # The server still checks each request; this is only for the interface.
+    permissions: list[str] = []
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def _fill_permissions(self) -> "UserOut":
+        import permissions as perms
+
+        held = perms.for_role(self.role)
+        self.permissions = [p for p in perms.PERMISSIONS if p in held]
+        return self
 
 
 class TeamAccountIn(BaseModel):
