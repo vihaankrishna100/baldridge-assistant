@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     assistant_effort: str = "medium"
     assistant_max_tokens: int = 8192
 
+    # A quick extra model call that rewords each question the way the
+    # documents would before searching. Blank model = the assistant's model.
+    query_expansion: bool = True
+    query_expansion_model: str = ""
     retrieval_top_k: int = 8
     retrieval_candidates: int = 30
     retrieval_min_score: float = 0.08

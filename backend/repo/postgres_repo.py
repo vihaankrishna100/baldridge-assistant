@@ -204,6 +204,14 @@ class PostgresRepo:
                    ORDER BY created_at DESC""",
                 (utcnow(),)).fetchall())
 
+    def list_unaccepted_invites(self) -> list[InviteRecord]:
+        """Expired ones too, newest first, so the admin page can offer to
+        resend an invitation nobody used in time."""
+        with get_pool().connection() as c:
+            return _all(InviteRecord, c.execute(
+                """SELECT * FROM invites WHERE accepted_at IS NULL
+                   ORDER BY created_at DESC""").fetchall())
+
     def create_invite(self, invite: InviteRecord) -> InviteRecord:
         invite.email = invite.email.lower()
         with get_pool().connection() as c:

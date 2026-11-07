@@ -233,13 +233,16 @@ def _user_from_challenge(token: str, expected_scope: str) -> UserRecord:
 
 
 @router.post("/2fa/setup", response_model=TotpSetupResponse)
-def start_2fa_setup(payload: dict):
+def start_2fa_setup(payload: dict, request: Request):
     user = _user_from_challenge(payload.get("challenge_token", ""), "2fa_setup")
 
     secret = new_totp_secret()
     user.totp_secret = secret
     user.totp_confirmed = False
     get_repo().save_user(user)
+    # With 2fa_setup_failed below, this is what shows an admin where a new
+    # account got stuck: shown the QR code, then wrong codes or nothing.
+    audit.log("2fa_setup_started", user=user, request=request)
 
     uri = totp_uri(secret, user.email)
     buf = io.BytesIO()
@@ -252,6 +255,7 @@ def confirm_2fa(payload: TwoFactorRequest, request: Request):
     user, claims = _challenge(payload.challenge_token, "2fa_setup")
     _spend_attempt(claims)
     if not verify_totp(user.totp_secret or "", payload.code):
+        audit.log("2fa_setup_failed", user=user, detail="code didn't match", request=request)
         raise HTTPException(status_code=401, detail="That code didn't match. Try the next one.")
     user.totp_confirmed = True
     get_repo().save_user(user)
@@ -346,6 +350,7 @@ def confirm_enroll(
         ok = check_email_code(claims, payload.code)
         secret = EMAIL_2FA
     if not ok:
+        audit.log("2fa_setup_failed", user=user, detail="code didn't match", request=request)
         raise HTTPException(status_code=401, detail="That code didn't match. Check it and try again.")
     user.totp_secret = secret
     user.totp_confirmed = True

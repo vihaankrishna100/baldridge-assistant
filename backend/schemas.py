@@ -1,9 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Literal
+from datetime import datetime, timezone
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, PlainSerializer
+
+
+def utc_iso(value: datetime) -> str:
+    """Every timestamp is stored as naive UTC. Sent without a zone, the
+    browser reads it as local time, which put the whole audit trail 4-5 hours
+    ahead for Eastern users. The trailing Z says what the value actually is."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+UtcDatetime = Annotated[datetime, PlainSerializer(utc_iso, return_type=str, when_used="json")]
 
 
 class LoginRequest(BaseModel):
@@ -63,8 +75,8 @@ class UserOut(BaseModel):
     totp_confirmed: bool
     twofa_method: str = ""
     is_active: bool
-    last_login_at: datetime | None = None
-    created_at: datetime
+    last_login_at: UtcDatetime | None = None
+    created_at: UtcDatetime
 
     model_config = {"from_attributes": True}
 
@@ -84,7 +96,10 @@ class InviteOut(BaseModel):
     email: str
     role: str
     invite_url: str
-    expires_at: datetime
+    expires_at: UtcDatetime
+    # True when the link also went out by email (SMTP configured and the send
+    # worked). The admin still sees the link either way.
+    emailed: bool = False
 
 
 class DocumentOut(BaseModel):
@@ -99,8 +114,8 @@ class DocumentOut(BaseModel):
     char_count: int
     size_bytes: int
     pii_flags: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
     model_config = {"from_attributes": True}
 
@@ -143,7 +158,7 @@ class AuditOut(BaseModel):
     # no autoincrement at all. Typing this int made /admin/audit 500 against
     # Firestore while passing against SQLite, whose ids really are integers.
     id: str
-    at: datetime
+    at: UtcDatetime
     user_email: str
     action: str
     target: str

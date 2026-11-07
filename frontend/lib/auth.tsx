@@ -12,6 +12,7 @@ export type User = {
   totp_confirmed: boolean;
   twofa_method?: "" | "app" | "email";
   is_active: boolean;
+  last_login_at?: string | null;
 };
 
 type AuthValue = {

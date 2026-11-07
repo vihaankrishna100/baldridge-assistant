@@ -140,6 +140,9 @@ class FirestoreRepo:
         ]
         return sorted(rows, key=lambda i: i.created_at, reverse=True)
 
+    def list_unaccepted_invites(self) -> list[InviteRecord]:
+        return self.list_open_invites()
+
     def create_invite(self, invite: InviteRecord) -> InviteRecord:
         self._col("invites").document(invite.id).set(_to_dict(invite))
         return invite

@@ -12,7 +12,8 @@ from models import ROLE_TEAM, ROLES
 from rag.index import index
 from repo import get_repo
 from repo.base import EmailTaken, InviteRecord, UserRecord, utcnow
-from schemas import AuditOut, InviteCreate, InviteOut, TeamAccountIn, UserOut
+from mailer import MailError, send_invite
+from schemas import AuditOut, InviteCreate, InviteOut, TeamAccountIn, UserOut, utc_iso
 from security import hash_password, new_invite_token, password_problems
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -25,59 +26,115 @@ def list_users(_: UserRecord = Depends(require_admin)):
     return [UserOut.model_validate(u) for u in get_repo().list_users()]
 
 
-@router.post("/invites", response_model=InviteOut, status_code=201)
-def create_invite(
-    payload: InviteCreate,
-    request: Request,
-    admin: UserRecord = Depends(require_admin),
-):
+def _issue_invite(email: str, role: str, admin: UserRecord, request: Request,
+                  action: str = "invite_created") -> InviteOut:
     store = get_repo()
-    email = payload.email.lower()
-    if payload.role not in ROLES:
+    email = email.lower()
+    if role not in ROLES:
         raise HTTPException(status_code=400, detail="Unknown role.")
     if store.get_user_by_email(email):
         raise HTTPException(status_code=409, detail="That email already has an account.")
+
+    # One live link per person. Re-inviting used to leave the earlier links
+    # working alongside the new one, so the list filled with duplicates and an
+    # old forwarded email could still create the account.
+    store.delete_invites_for_email(email)
 
     raw, token_hash = new_invite_token()
     invite = store.create_invite(
         InviteRecord(
             email=email,
-            role=payload.role,
+            role=role,
             token_hash=token_hash,
             created_by=admin.id,
             expires_at=utcnow() + timedelta(days=INVITE_TTL_DAYS),
         )
     )
 
-    audit.log("invite_created", user=admin, target=email, detail=payload.role, request=request)
-
     # The site the links open on: the first https origin, so a localhost
     # entry left in CORS_ORIGINS for development never ends up in an invite.
     origins = settings.cors_origin_list
     origin = next((o for o in origins if o.startswith("https://")), origins[0] if origins else "")
+    # Shown once. The plaintext token is never stored, so it cannot be
+    # recovered later — the admin re-invites instead.
+    url = f"{origin}/invite/{raw}"
+
+    emailed = False
+    if settings.email_codes_available:
+        try:
+            send_invite(email, url, admin.full_name or admin.email, invite.expires_at)
+            emailed = True
+        except MailError as exc:
+            audit.log("invite_email_failed", user=admin, target=email, detail=str(exc),
+                      request=request)
+
+    audit.log(action, user=admin, target=email,
+              detail=role + (" — emailed" if emailed else ""), request=request)
     return InviteOut(
         id=invite.id,
         email=invite.email,
         role=invite.role,
-        # Shown once. The plaintext token is never stored, so it cannot be
-        # recovered later — the admin re-invites instead.
-        invite_url=f"{origin}/invite/{raw}",
+        invite_url=url,
         expires_at=invite.expires_at,
+        emailed=emailed,
     )
+
+
+@router.post("/invites", response_model=InviteOut, status_code=201)
+def create_invite(
+    payload: InviteCreate,
+    request: Request,
+    admin: UserRecord = Depends(require_admin),
+):
+    return _issue_invite(payload.email, payload.role, admin, request)
+
+
+# Expired invitations stay listed this long, marked expired, with a resend
+# button. Before, an invite vanished from the page the moment it lapsed, so
+# nobody noticed that most of them were never used.
+EXPIRED_INVITES_SHOWN_DAYS = 30
 
 
 @router.get("/invites")
 def list_invites(_: UserRecord = Depends(require_admin)):
-    return [
-        {
+    store = get_repo()
+    now = utcnow()
+    has_account = {u.email.lower() for u in store.list_users()}
+    seen: set[str] = set()
+    out = []
+    for i in store.list_unaccepted_invites():  # newest first
+        email = i.email.lower()
+        # The newest invite per person is the one that matters; older ones
+        # for someone who has since signed up are history, not to-dos.
+        if email in seen or email in has_account:
+            continue
+        seen.add(email)
+        expired = i.expires_at < now
+        if expired and i.expires_at < now - timedelta(days=EXPIRED_INVITES_SHOWN_DAYS):
+            continue
+        out.append({
             "id": i.id,
             "email": i.email,
             "role": i.role,
-            "expires_at": i.expires_at.isoformat(),
-            "created_at": i.created_at.isoformat(),
-        }
-        for i in get_repo().list_open_invites()
-    ]
+            "expired": expired,
+            "expires_at": utc_iso(i.expires_at),
+            "created_at": utc_iso(i.created_at),
+        })
+    # Expired first: those are the ones needing someone to act.
+    out.sort(key=lambda r: not r["expired"])
+    return out
+
+
+@router.post("/invites/{invite_id}/resend", response_model=InviteOut, status_code=201)
+def resend_invite(
+    invite_id: str,
+    request: Request,
+    admin: UserRecord = Depends(require_admin),
+):
+    invite = get_repo().get_invite(invite_id)
+    if invite is None or invite.accepted_at is not None:
+        raise HTTPException(status_code=404, detail="Invitation not found.")
+    return _issue_invite(invite.email, invite.role, admin, request, action="invite_resent")
 
 
 @router.delete("/invites/{invite_id}")

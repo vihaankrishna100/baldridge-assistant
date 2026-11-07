@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -40,6 +41,28 @@ REASONS = {
     "meta_query": "I can only answer questions about {org}'s internal documents.",
     "error": "Something went wrong on my end while looking this up.",
 }
+
+
+_expander = ThreadPoolExecutor(max_workers=4, thread_name_prefix="expand")
+
+
+def _fuse(result_lists: list[list[Hit]], top_k: int) -> list[Hit]:
+    """Reciprocal rank fusion: a passage's place in the merged list comes from
+    its rank in each search, not its raw score. Scores are the share of the
+    query's words a passage contains, so a 15-word reworded query scores every
+    passage lower than the 4-word original did. Merging on score would bury
+    exactly the passages the rewording was there to find. Each hit keeps its
+    best score, which is what the citations and audit report."""
+    k = 60  # the usual RRF constant; damps the gap between rank 1 and rank 2
+    fused: dict[str, float] = {}
+    best: dict[str, Hit] = {}
+    for hits in result_lists:
+        for rank, h in enumerate(hits, start=1):
+            fused[h.chunk_id] = fused.get(h.chunk_id, 0.0) + 1.0 / (k + rank)
+            if h.chunk_id not in best or h.score > best[h.chunk_id].score:
+                best[h.chunk_id] = h
+    order = sorted(fused, key=lambda cid: fused[cid], reverse=True)
+    return [best[cid] for cid in order[:top_k]]
 
 
 def _sse(event: str, data: dict) -> str:
@@ -126,19 +149,29 @@ def ask(
         reason = "no_documents"
     else:
         tiers = visible_tiers_for_role(user.role)
-        hits = index.search(question, tiers)
+        previous = next((t["content"] for t in reversed(history) if t["role"] == "user"), "")
+        # Started first so the model call overlaps the searches below.
+        expansion = (
+            _expander.submit(llm.expand_query, question, previous)
+            if settings.query_expansion and settings.anthropic_api_key
+            else None
+        )
+        result_lists = [index.search(question, tiers)]
         # A follow-up like "who do I give it to once it's done?" names nothing
         # searchable — "it" is in the previous question. Searching the two
-        # together finds the passages the conversation is actually about;
-        # merging keeps whichever match scores better, so a follow-up that
-        # changes the subject still gets its own hits.
-        previous = next((t["content"] for t in reversed(history) if t["role"] == "user"), "")
+        # together finds the passages the conversation is actually about.
         if previous:
-            merged = {h.chunk_id: h for h in hits}
-            for h in index.search(f"{previous[:500]} {question}", tiers):
-                if h.chunk_id not in merged or h.score > merged[h.chunk_id].score:
-                    merged[h.chunk_id] = h
-            hits = sorted(merged.values(), key=lambda h: h.score, reverse=True)[: settings.retrieval_top_k]
+            result_lists.append(index.search(f"{previous[:500]} {question}", tiers))
+        # The question reworded the way the documents word things, so "how
+        # young can a child be" also searches "youth" and "minimum age".
+        if expansion is not None:
+            try:
+                terms = expansion.result(timeout=10)
+            except Exception:  # noqa: BLE001 - expansion only adds recall
+                terms = ""
+            if terms:
+                result_lists.append(index.search(terms, tiers))
+        hits = _fuse(result_lists, settings.retrieval_top_k)
         # No score gate here any more. A weak retrieval score means the corpus
         # doesn't cover the question — but that is exactly the case where the
         # answer might be ordinary world knowledge ("how many ounces in a cup"),

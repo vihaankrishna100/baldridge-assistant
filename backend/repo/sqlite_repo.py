@@ -142,6 +142,12 @@ class SqliteRepo:
                     .order_by(m.Invite.created_at.desc()).all())
             return [_invite(r) for r in rows]
 
+    def list_unaccepted_invites(self) -> list[InviteRecord]:
+        with SessionLocal() as s:
+            rows = (s.query(m.Invite).filter(m.Invite.accepted_at.is_(None))
+                    .order_by(m.Invite.created_at.desc()).all())
+            return [_invite(r) for r in rows]
+
     def create_invite(self, invite: InviteRecord) -> InviteRecord:
         with SessionLocal() as s:
             s.add(m.Invite(
@@ -157,6 +163,11 @@ class SqliteRepo:
         with SessionLocal() as s:
             row = s.get(m.Invite, invite.id)
             if row:
+                # Every field, as the Postgres repo does, so the two agree.
+                row.email = invite.email
+                row.role = invite.role
+                row.token_hash = invite.token_hash
+                row.expires_at = invite.expires_at
                 row.accepted_at = invite.accepted_at
                 s.commit()
 

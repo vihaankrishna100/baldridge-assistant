@@ -34,7 +34,8 @@ type Settings = {
   storage: string;
 };
 
-type Invite = { id: string; email: string; role: string; expires_at: string };
+type Invite = { id: string; email: string; role: string; expires_at: string; expired: boolean };
+type InviteResult = { email: string; invite_url: string; emailed: boolean };
 type AuditRow = {
   id: number;
   at: string;
@@ -67,7 +68,7 @@ export default function AdminPage() {
   const [retention, setRetention] = useState<{ days: number; choices: number[] } | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("staff");
-  const [inviteLink, setInviteLink] = useState("");
+  const [inviteResult, setInviteResult] = useState<InviteResult | null>(null);
   const [error, setError] = useState("");
   const [twoStepDone, setTwoStepDone] = useState(false);
 
@@ -121,15 +122,26 @@ export default function AdminPage() {
     e.preventDefault();
     setError("");
     try {
-      const res = await api<{ invite_url: string }>("/admin/invites", {
+      const res = await api<InviteResult>("/admin/invites", {
         method: "POST",
         body: { email: inviteEmail, role: inviteRole },
       });
-      setInviteLink(res.invite_url);
+      setInviteResult(res);
       setInviteEmail("");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the invitation.");
+    }
+  };
+
+  const resendInvite = async (inv: Invite) => {
+    setError("");
+    try {
+      const res = await api<InviteResult>(`/admin/invites/${inv.id}/resend`, { method: "POST" });
+      setInviteResult(res);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not resend the invitation.");
     }
   };
 
@@ -339,17 +351,19 @@ export default function AdminPage() {
               </button>
             </form>
 
-            {inviteLink && (
+            {inviteResult && (
               <div className="mt-4 rounded-xl border border-mint/40 bg-mint/8 p-3.5">
                 <p className="text-xs text-mint">
-                  Send this link to the new team member. It expires in 7 days and is shown only
-                  once — nothing stores the link itself.
+                  {inviteResult.emailed
+                    ? `Emailed to ${inviteResult.email}. The link is also here if they can't find it. `
+                    : `Send this link to ${inviteResult.email}. `}
+                  It expires in 7 days and is shown only once. Nothing stores the link itself.
                 </p>
                 <code className="mt-2 block break-all rounded-lg bg-ink/60 p-2.5 font-mono text-xs text-cyan">
-                  {inviteLink}
+                  {inviteResult.invite_url}
                 </code>
                 <button
-                  onClick={() => void navigator.clipboard.writeText(inviteLink)}
+                  onClick={() => void navigator.clipboard.writeText(inviteResult.invite_url)}
                   className="mt-2 rounded-lg border border-line px-3 py-1 text-xs text-muted hover:text-cyan"
                 >
                   Copy
@@ -364,12 +378,25 @@ export default function AdminPage() {
                     key={inv.id}
                     className="flex items-center gap-3 rounded-lg bg-ink/40 px-3 py-2 text-sm"
                   >
-                    <span className="flex-1 text-muted">
+                    <span className="min-w-0 flex-1 break-words text-muted">
                       {inv.email}{" "}
                       <span className="text-faint">
-                        · {inv.role} · expires {new Date(inv.expires_at).toLocaleDateString()}
+                        · {inv.role} ·{" "}
+                        {inv.expired ? (
+                          <span className="text-amber">
+                            expired {new Date(inv.expires_at).toLocaleDateString()}, never used
+                          </span>
+                        ) : (
+                          <>expires {new Date(inv.expires_at).toLocaleDateString()}</>
+                        )}
                       </span>
                     </span>
+                    <button
+                      onClick={() => void resendInvite(inv)}
+                      className={`text-xs ${inv.expired ? "text-cyan hover:brightness-110" : "text-faint hover:text-cyan"}`}
+                    >
+                      {inv.expired ? "Send a new link" : "Resend"}
+                    </button>
                     <button
                       onClick={async () => {
                         await api(`/admin/invites/${inv.id}`, { method: "DELETE" });
@@ -406,6 +433,13 @@ export default function AdminPage() {
                           : " · no sign-in code yet"}
                       {u.is_active ? "" : " · deactivated"}
                     </p>
+                    {u.is_active && !u.last_login_at && (
+                      <p className="mt-0.5 text-[11px] text-amber">
+                        Hasn&apos;t finished signing in yet. They can sign in with their password
+                        and scan the new QR code with an authenticator app (Google or Microsoft
+                        Authenticator); the 6-digit code from the app finishes setup.
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-1.5">
                     <select
