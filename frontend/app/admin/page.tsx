@@ -33,6 +33,9 @@ type Settings = {
   max_queries_per_hour: number;
   storage: string;
   email_enabled?: boolean;
+  model_source?: "admin" | "server";
+  server_model?: string;
+  model_choices?: { id: string; label: string }[];
 };
 
 type Invite = { id: string; email: string; role: string; expires_at: string; expired: boolean };
@@ -342,8 +345,8 @@ export default function AdminPage() {
           {settings && (
             <section className="rounded-2xl border border-line bg-card/70 p-6">
               <h2 className="mb-4 text-sm font-semibold text-text">Settings</h2>
+              <ModelPicker settings={settings} onChange={load} />
               <dl className="grid gap-x-8 gap-y-2.5 text-sm sm:grid-cols-2">
-                <Row label="AI model" value={settings.model} />
                 <Row label="Searchable sections" value={String(stats.index.chunks)} />
                 <Row
                   label="Question limit"
@@ -769,6 +772,59 @@ function TeamLogin({ team, onChange }: { team?: User; onChange: () => Promise<vo
       {notice && <p className="mt-3 text-sm text-mint">{notice}</p>}
       {error && <p className="mt-3 text-sm text-rose">{error}</p>}
     </section>
+  );
+}
+
+function ModelPicker({ settings, onChange }: { settings: Settings; onChange: () => Promise<void> }) {
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const choices = settings.model_choices ?? [];
+  // "" means "use the server's setting", shown as its own option.
+  const value = settings.model_source === "admin" ? settings.model : "";
+  const serverLabel = choices.find((c) => c.id === settings.server_model)?.label.split(":")[0];
+
+  const change = async (model: string) => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await api("/admin/model", { method: "PUT", body: { model } });
+      await onChange();
+      setMessage({ text: "Saved. New questions use it within about a minute.", ok: true });
+    } catch (e) {
+      setMessage({ text: e instanceof Error ? e.message : "Could not change the model.", ok: false });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mb-4 rounded-xl border border-line-soft/60 bg-ink/30 p-3.5">
+      <label className="flex flex-wrap items-center justify-between gap-3 text-sm">
+        <span className="text-muted">AI model answering questions</span>
+        <select
+          value={value}
+          disabled={saving || choices.length === 0}
+          onChange={(e) => void change(e.target.value)}
+          className="max-w-full rounded-lg border border-line bg-ink/60 px-2.5 py-1.5 text-sm text-text outline-none focus:border-cyan/50"
+        >
+          <option value="">
+            Server setting ({serverLabel ?? settings.server_model ?? settings.model})
+          </option>
+          {choices.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="mt-1.5 text-xs text-faint">
+        In use now: <span className="text-text">{settings.model}</span>. If it ever declines a
+        question on safety grounds, the question is asked again on Claude Opus 5.
+      </p>
+      {message && (
+        <p className={`mt-1.5 text-xs ${message.ok ? "text-mint" : "text-rose"}`}>{message.text}</p>
+      )}
+    </div>
   );
 }
 

@@ -210,7 +210,7 @@ def ask(
 
         detail = ("general knowledge" if result.general else
                   f"{len(result.citations)} citations, score={top_score}")
-        if result.model and result.model != settings.assistant_model:
+        if result.fell_back:
             detail += f" (answered by {result.model} after the main model declined)"
         _log("question_answered", user_id, user_email, ip, detail=detail,
              target=question[:200])

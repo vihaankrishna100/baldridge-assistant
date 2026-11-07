@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Iterator
 
@@ -21,6 +23,56 @@ NO_ANSWER = "[[NO_ANSWER]]"
 GENERAL = "[[GENERAL]]"
 
 _client: anthropic.Anthropic | None = None
+
+# ------------------------------------------------------------- model choice
+# An admin can pick the model on the Admin page; that choice is stored in the
+# database and wins over ASSISTANT_MODEL, so switching doesn't need someone
+# with access to the hosting account. Blank = use ASSISTANT_MODEL.
+MODEL_SETTING_KEY = "assistant_model"
+MODEL_CHOICES = {
+    "claude-sonnet-5-5": "Claude Sonnet 5.5: fast, about half the cost",
+    "claude-opus-5-5": "Claude Opus 5.5: strongest, slower",
+    "claude-opus-5": "Claude Opus 5: the previous default",
+}
+_MODEL_TTL = 60.0  # seconds; other server instances pick up a change this fast
+_model_cache: tuple[float, str] = (0.0, "")
+_model_lock = threading.Lock()
+
+
+def admin_model() -> str:
+    """The admin's stored choice, or "" when none is set (or it can't be read)."""
+    global _model_cache
+    with _model_lock:
+        at, value = _model_cache
+        if at and time.monotonic() - at < _MODEL_TTL:
+            return value
+    from repo import get_repo
+
+    value = ""
+    store = get_repo()
+    if hasattr(store, "get_setting"):
+        try:
+            value = (store.get_setting(MODEL_SETTING_KEY) or "").strip()
+        except Exception:  # noqa: BLE001 - a database hiccup falls back to the env setting
+            value = ""
+    if value not in MODEL_CHOICES:
+        value = ""
+    with _model_lock:
+        _model_cache = (time.monotonic(), value)
+    return value
+
+
+def current_model() -> str:
+    return admin_model() or settings.assistant_model
+
+
+def set_admin_model(model: str) -> None:
+    from repo import get_repo
+
+    get_repo().set_setting(MODEL_SETTING_KEY, model)
+    global _model_cache
+    with _model_lock:
+        _model_cache = (0.0, "")
 
 
 def get_client() -> anthropic.Anthropic:
@@ -212,7 +264,7 @@ def expand_query(question: str, previous: str = "") -> str:
         content += f"<previous_question>\n{previous[:500]}\n</previous_question>\n"
     content += f"<question>\n{question[:1000]}\n</question>"
     response = get_client().with_options(timeout=8.0, max_retries=0).messages.create(
-        model=settings.query_expansion_model or settings.assistant_model,
+        model=settings.query_expansion_model or current_model(),
         max_tokens=2000,
         output_config={"effort": "low"},
         system=EXPAND_PROMPT,
@@ -235,7 +287,8 @@ class AnswerResult:
     general: bool = False   # answered from world knowledge, not the documents
     escalation_reason: str = ""
     citations: list[dict] = field(default_factory=list)
-    model: str = ""         # which model produced this; differs on fallback
+    model: str = ""         # which model produced this
+    fell_back: bool = False  # the main model declined; the fallback answered
     input_tokens: int = 0
     output_tokens: int = 0
 
@@ -328,9 +381,10 @@ def stream_answer(
     has streamed is left as an escalation: retrying then would show the
     reader two different starts to the same answer.
     """
-    models = [settings.assistant_model]
+    main = current_model()
+    models = [main]
     fallback = settings.assistant_fallback_model.strip()
-    if fallback and fallback != settings.assistant_model:
+    if fallback and fallback != main:
         models.append(fallback)
 
     for i, model in enumerate(models):
@@ -346,6 +400,7 @@ def stream_answer(
         if (result.escalation_reason == "safety_refusal" and not streamed
                 and i + 1 < len(models)):
             continue
+        result.fell_back = i > 0
         yield ("done", result)
         return
 

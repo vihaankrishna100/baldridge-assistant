@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 import audit
+import llm
 from config import settings
 from deps import require_admin
 from models import ROLE_TEAM, ROLES
@@ -398,7 +399,12 @@ def read_settings(_: UserRecord = Depends(require_admin)):
         "contact_configured": bool(settings.org_phone or settings.org_email),
         "require_2fa": settings.require_2fa,
         "twofa_exempt": settings.twofa_exempt_list,
-        "model": settings.assistant_model,
+        "model": llm.current_model(),
+        # "admin" when picked on the Admin page, "server" when it comes from
+        # ASSISTANT_MODEL (or the code default).
+        "model_source": "admin" if llm.admin_model() else "server",
+        "server_model": settings.assistant_model,
+        "model_choices": [{"id": k, "label": v} for k, v in llm.MODEL_CHOICES.items()],
         "effort": settings.assistant_effort,
         "retrieval_top_k": settings.retrieval_top_k,
         "retrieval_min_score": settings.retrieval_min_score,
@@ -409,3 +415,21 @@ def read_settings(_: UserRecord = Depends(require_admin)):
         "storage": type(get_docstore()).__name__,
         "repo": type(get_repo()).__name__,
     }
+
+
+class ModelIn(BaseModel):
+    model: str  # one of llm.MODEL_CHOICES, or "" to go back to ASSISTANT_MODEL
+
+
+@router.put("/model")
+def put_model(payload: ModelIn, request: Request, user: UserRecord = Depends(require_admin)):
+    model = payload.model.strip()
+    if model and model not in llm.MODEL_CHOICES:
+        raise HTTPException(status_code=400, detail="Pick one of the listed models.")
+    before = llm.current_model()
+    llm.set_admin_model(model)
+    after = llm.current_model()
+    audit.log("model_changed", user=user, target=after,
+              detail=f"{before} -> {after}" + ("" if model else " (server default)"),
+              request=request)
+    return {"model": after, "model_source": "admin" if model else "server"}
