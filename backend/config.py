@@ -26,8 +26,12 @@ class Settings(BaseSettings):
     # a real OS environment variable win over the .env file, and CLAUDE_MODEL /
     # CLAUDE_EFFORT are generic enough that another tool on the host can set
     # them and silently reconfigure this app.
-    assistant_model: str = "claude-opus-5"
+    assistant_model: str = "claude-sonnet-5-5"
     assistant_effort: str = "medium"
+    # Re-asked on this model when the main one declines on safety grounds
+    # before writing anything. Sonnet 5.5's "general harms" check can trip on
+    # ordinary policy questions (pat-downs, restraint, medication). Blank = off.
+    assistant_fallback_model: str = "claude-opus-5"
     assistant_max_tokens: int = 8192
 
     # A quick extra model call that rewords each question the way the

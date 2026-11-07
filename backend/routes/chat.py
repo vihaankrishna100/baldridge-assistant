@@ -208,9 +208,11 @@ def ask(
             yield from _finish_escalated(why, user_id, user_email, ip, question)
             return
 
-        _log("question_answered", user_id, user_email, ip,
-             detail=("general knowledge" if result.general else
-                     f"{len(result.citations)} citations, score={top_score}"),
+        detail = ("general knowledge" if result.general else
+                  f"{len(result.citations)} citations, score={top_score}")
+        if result.model and result.model != settings.assistant_model:
+            detail += f" (answered by {result.model} after the main model declined)"
+        _log("question_answered", user_id, user_email, ip, detail=detail,
              target=question[:200])
         yield _sse(
             "done",

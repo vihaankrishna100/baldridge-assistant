@@ -235,6 +235,7 @@ class AnswerResult:
     general: bool = False   # answered from world knowledge, not the documents
     escalation_reason: str = ""
     citations: list[dict] = field(default_factory=list)
+    model: str = ""         # which model produced this; differs on fallback
     input_tokens: int = 0
     output_tokens: int = 0
 
@@ -322,12 +323,45 @@ def stream_answer(
 ) -> Iterator[tuple[str, object]]:
     """Yields ("delta", str) chunks, then a final ("done", AnswerResult).
 
-    The first tokens are buffered until we can tell whether the model is
-    emitting the refusal sentinel, so a refusal never flashes partial text at
-    the user before the escalation card replaces it.
+    If the model declines on safety grounds before a word reaches the user,
+    the question is asked again on the fallback model. A decline after text
+    has streamed is left as an escalation: retrying then would show the
+    reader two different starts to the same answer.
+    """
+    models = [settings.assistant_model]
+    fallback = settings.assistant_fallback_model.strip()
+    if fallback and fallback != settings.assistant_model:
+        models.append(fallback)
+
+    for i, model in enumerate(models):
+        result: AnswerResult | None = None
+        streamed = False
+        for kind, value in _stream_once(model, question, hits, history):
+            if kind == "delta":
+                streamed = True
+                yield kind, value
+            else:
+                result = value  # type: ignore[assignment]
+        assert result is not None
+        if (result.escalation_reason == "safety_refusal" and not streamed
+                and i + 1 < len(models)):
+            continue
+        yield ("done", result)
+        return
+
+
+def _stream_once(
+    model: str,
+    question: str,
+    hits: list[Hit],
+    history: list[dict] | None,
+) -> Iterator[tuple[str, object]]:
+    """One model's attempt. The first tokens are buffered until we can tell
+    whether the model is emitting the refusal sentinel, so a refusal never
+    flashes partial text at the user before the escalation card replaces it.
     """
     client = get_client()
-    result = AnswerResult()
+    result = AnswerResult(model=model)
 
     messages: list[dict] = []
     for turn in (history or [])[-10:]:
@@ -339,7 +373,7 @@ def stream_answer(
     collected: list[str] = []
 
     with client.messages.stream(
-        model=settings.assistant_model,
+        model=model,
         max_tokens=settings.assistant_max_tokens,
         thinking={"type": "adaptive"},
         output_config={"effort": settings.assistant_effort},
