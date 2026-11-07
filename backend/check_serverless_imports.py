@@ -79,6 +79,24 @@ def main() -> int:
     else:
         print(f"  ok   routes registered         ({len(routes)} total)")
 
+    # The site and the API are different origins, so the browser asks CORS
+    # before every PUT/PATCH/DELETE. A method missing from allow_methods works
+    # in every server-side test and fails in the browser as "Failed to fetch":
+    # PUT was missing, which silently broke three admin controls.
+    from starlette.middleware.cors import CORSMiddleware
+
+    allowed: set[str] = set()
+    for m in app_module.app.user_middleware:
+        if m.cls is CORSMiddleware:
+            allowed = {x.upper() for x in m.kwargs.get("allow_methods", [])}
+    used = {meth for r in app_module.app.routes for meth in (getattr(r, "methods", None) or set())}
+    missing = sorted(used - allowed - {"HEAD"}) if "*" not in allowed else []
+    if missing:
+        failures.append(f"CORS does not allow methods the API uses: {missing}")
+        print(f"  FAIL CORS allows every method {missing} missing")
+    else:
+        print(f"  ok   CORS allows every method  ({', '.join(sorted(used - {'HEAD'}))})")
+
     print()
     if failures:
         print(f"{len(failures)} failure(s) — this would break the Vercel deploy")
